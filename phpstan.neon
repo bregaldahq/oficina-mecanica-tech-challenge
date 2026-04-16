@@ -1,0 +1,8 @@
+parameters:
+    level: 8
+    paths:
+        - src
+        - tests
+    ignoreErrors:
+        # PHPUnit mock types are inherently dynamic
+        - '#PHPUnit\\Framework\\MockObject\\MockObject#'

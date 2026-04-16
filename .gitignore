@@ -1,0 +1,5 @@
+vendor/
+.env
+coverage-report/
+.phpunit.cache/
+*.log

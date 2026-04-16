@@ -1,0 +1,1029 @@
+openapi: 3.0.3
+info:
+  title: Oficina Mecânica API
+  description: |
+    API REST do Sistema Integrado de Atendimento e Execução de Serviços.
+
+    **Arquitetura:** Domain-Driven Design (DDD) em PHP 8.2 puro, sem frameworks MVC.
+
+    **Erros:** Todos os erros retornam `{"error": "mensagem descritiva"}`. Códigos:
+    - `400` — Campos obrigatórios ausentes ou inválidos
+    - `401` — Token ausente ou inválido
+    - `404` — Recurso não encontrado
+    - `422` — Violação de regra de negócio
+    - `429` — Rate limit excedido (auth/login)
+    - `500` — Erro interno do servidor
+  version: 1.0.0
+  contact:
+    name: Oficina Mecânica API
+
+servers:
+  - url: http://localhost:8080/api
+    description: Ambiente local Docker
+
+tags:
+  - name: Sistema
+    description: Health check e monitoramento
+  - name: Autenticação
+    description: Geração de token JWT
+  - name: Clientes
+    description: Gerenciamento de clientes
+  - name: Veículos
+    description: Gerenciamento de veículos
+  - name: Peças
+    description: Catálogo e controle de estoque de peças
+  - name: Serviços
+    description: Catálogo de serviços e métricas
+  - name: Ordens de Serviço
+    description: Ciclo de vida completo das ordens de serviço
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: "Token JWT obtido via POST /api/auth/login"
+
+  responses:
+    Unauthorized:
+      description: Token ausente, inválido ou expirado
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error: Token expirado ou invalido
+    NotFound:
+      description: Recurso não encontrado
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    BadRequest:
+      description: Dados de entrada inválidos ou obrigatórios ausentes
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    UnprocessableEntity:
+      description: Regra de negócio violada
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+
+  schemas:
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+          example: Mensagem de erro descritiva.
+
+    Customer:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          example: 3fa85f64-5717-4562-b3fc-2c963f66afa6
+        name:
+          type: string
+          example: João da Silva
+        document:
+          type: string
+          description: CPF (11 dígitos) ou CNPJ (14 dígitos), apenas dígitos
+          example: "52998224725"
+
+    Vehicle:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        customer_id:
+          type: string
+          format: uuid
+        license_plate:
+          type: string
+          description: Formato antigo (ABC-1234) ou Mercosul (ABC1D23)
+          example: ABC-1234
+        brand:
+          type: string
+          example: Toyota
+        model:
+          type: string
+          example: Corolla
+        year:
+          type: integer
+          minimum: 1886
+          example: 2020
+
+    Part:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        description:
+          type: string
+          example: Filtro de óleo
+        price:
+          type: number
+          format: float
+          example: 45.90
+        stock_quantity:
+          type: integer
+          example: 50
+
+    ServiceItem:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        description:
+          type: string
+          example: Troca de óleo
+        base_price:
+          type: number
+          format: float
+          example: 150.00
+        estimated_time_minutes:
+          type: integer
+          example: 60
+
+    ServiceItemMetric:
+      type: object
+      properties:
+        service_item_id:
+          type: string
+          format: uuid
+        description:
+          type: string
+          example: Troca de óleo
+        estimated_time_minutes:
+          type: integer
+          example: 60
+        times_executed:
+          type: integer
+          description: Quantidade de ordens de serviço que usaram este serviço
+          example: 12
+        total_estimated_minutes:
+          type: integer
+          description: Total acumulado de minutos estimados para este serviço
+          example: 720
+
+    OrderStatus:
+      type: string
+      enum:
+        - RECEIVED
+        - DIAGNOSIS
+        - AWAITING_APPROVAL
+        - EXECUTING
+        - FINISHED
+        - DELIVERED
+
+    ServiceOrder:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        customer:
+          $ref: '#/components/schemas/Customer'
+        vehicle:
+          $ref: '#/components/schemas/Vehicle'
+        status:
+          $ref: '#/components/schemas/OrderStatus'
+        services:
+          type: array
+          items:
+            $ref: '#/components/schemas/ServiceItem'
+        parts:
+          type: array
+          items:
+            type: object
+            properties:
+              id:
+                type: string
+                format: uuid
+              description:
+                type: string
+              price:
+                type: number
+              stock_quantity:
+                type: integer
+              quantity:
+                type: integer
+        total_amount:
+          type: number
+          format: float
+          example: 285.80
+        created_at:
+          type: string
+          format: date-time
+
+security:
+  - BearerAuth: []
+
+paths:
+  # ── Sistema ──────────────────────────────────────────────────────────────────
+  /health:
+    get:
+      tags: [Sistema]
+      summary: Health check da API
+      security: []
+      responses:
+        '200':
+          description: API funcionando normalmente
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    enum: [ok, degraded]
+                    example: ok
+                  version:
+                    type: string
+                    example: 1.0.0
+                  database:
+                    type: string
+                    enum: [connected, error]
+                    example: connected
+                  timestamp:
+                    type: string
+                    format: date-time
+        '503':
+          description: API degradada (banco de dados indisponível)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  # ── Autenticação ──────────────────────────────────────────────────────────────
+  /auth/login:
+    post:
+      tags: [Autenticação]
+      summary: Realizar login e obter token JWT
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [username, password]
+              properties:
+                username:
+                  type: string
+                  example: admin
+                password:
+                  type: string
+                  example: admin123
+            example:
+              username: admin
+              password: admin123
+      responses:
+        '200':
+          description: Token gerado com sucesso
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  token:
+                    type: string
+                    example: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+        '400':
+          description: Campos obrigatórios ausentes
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Credenciais inválidas
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          description: Muitas tentativas de login (rate limit)
+          headers:
+            Retry-After:
+              schema:
+                type: integer
+              description: Segundos até o próximo bloco disponível
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  # ── Clientes ──────────────────────────────────────────────────────────────────
+  /customers:
+    get:
+      tags: [Clientes]
+      summary: Listar todos os clientes
+      responses:
+        '200':
+          description: Lista de clientes
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Customer'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      tags: [Clientes]
+      summary: Criar novo cliente
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, document]
+              properties:
+                name:
+                  type: string
+                  example: João da Silva
+                document:
+                  type: string
+                  description: CPF ou CNPJ (com ou sem formatação)
+                  example: 529.982.247-25
+            example:
+              name: João da Silva
+              document: "529.982.247-25"
+      responses:
+        '201':
+          description: Cliente criado com sucesso
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Customer'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+
+  /customers/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    get:
+      tags: [Clientes]
+      summary: Buscar cliente por ID
+      responses:
+        '200':
+          description: Cliente encontrado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Customer'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    put:
+      tags: [Clientes]
+      summary: Atualizar nome do cliente
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name:
+                  type: string
+                  example: João Atualizado da Silva
+      responses:
+        '200':
+          description: Cliente atualizado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Customer'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      tags: [Clientes]
+      summary: Remover cliente
+      responses:
+        '204':
+          description: Cliente removido com sucesso
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  # ── Veículos ──────────────────────────────────────────────────────────────────
+  /vehicles:
+    get:
+      tags: [Veículos]
+      summary: Listar todos os veículos
+      responses:
+        '200':
+          description: Lista de veículos
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Vehicle'
+    post:
+      tags: [Veículos]
+      summary: Cadastrar veículo
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [customer_id, license_plate, brand, model, year]
+              properties:
+                customer_id:
+                  type: string
+                  format: uuid
+                license_plate:
+                  type: string
+                  example: ABC-1234
+                brand:
+                  type: string
+                  example: Toyota
+                model:
+                  type: string
+                  example: Corolla
+                year:
+                  type: integer
+                  minimum: 1886
+                  example: 2020
+            example:
+              customer_id: 3fa85f64-5717-4562-b3fc-2c963f66afa6
+              license_plate: ABC-1234
+              brand: Toyota
+              model: Corolla
+              year: 2020
+      responses:
+        '201':
+          description: Veículo criado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Vehicle'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+
+  /vehicles/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+    get:
+      tags: [Veículos]
+      summary: Buscar veículo por ID
+      responses:
+        '200':
+          description: Veículo encontrado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Vehicle'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    put:
+      tags: [Veículos]
+      summary: Atualizar dados do veículo (brand, model, year)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [brand, model, year]
+              properties:
+                brand:
+                  type: string
+                  example: Honda
+                model:
+                  type: string
+                  example: Civic
+                year:
+                  type: integer
+                  example: 2022
+      responses:
+        '200':
+          description: Veículo atualizado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Vehicle'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+    delete:
+      tags: [Veículos]
+      summary: Remover veículo
+      responses:
+        '204':
+          description: Veículo removido
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  # ── Peças ─────────────────────────────────────────────────────────────────────
+  /parts:
+    get:
+      tags: [Peças]
+      summary: Listar peças do catálogo
+      responses:
+        '200':
+          description: Lista de peças
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Part'
+    post:
+      tags: [Peças]
+      summary: Cadastrar peça
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [description, price]
+              properties:
+                description:
+                  type: string
+                  example: Filtro de óleo
+                price:
+                  type: number
+                  example: 45.90
+                stock_quantity:
+                  type: integer
+                  default: 0
+                  example: 50
+            example:
+              description: Filtro de óleo
+              price: 45.90
+              stock_quantity: 50
+      responses:
+        '201':
+          description: Peça criada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Part'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /parts/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+    get:
+      tags: [Peças]
+      summary: Buscar peça por ID
+      responses:
+        '200':
+          description: Peça encontrada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Part'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    put:
+      tags: [Peças]
+      summary: Atualizar dados da peça (descrição e preço)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [description, price]
+              properties:
+                description:
+                  type: string
+                  example: Filtro de óleo premium
+                price:
+                  type: number
+                  example: 52.00
+      responses:
+        '200':
+          description: Peça atualizada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Part'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      tags: [Peças]
+      summary: Remover peça
+      responses:
+        '204':
+          description: Peça removida
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /parts/{id}/stock:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+    patch:
+      tags: [Peças]
+      summary: Repor estoque de peça (adiciona quantidade ao estoque atual)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [quantity]
+              properties:
+                quantity:
+                  type: integer
+                  minimum: 1
+                  example: 20
+      responses:
+        '200':
+          description: Estoque atualizado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Part'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  # ── Serviços ──────────────────────────────────────────────────────────────────
+  /service-items/metrics:
+    get:
+      tags: [Serviços]
+      summary: Métricas de uso dos serviços (tempo estimado e quantidade de ordens)
+      responses:
+        '200':
+          description: Métricas por serviço
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ServiceItemMetric'
+
+  /service-items:
+    get:
+      tags: [Serviços]
+      summary: Listar catálogo de serviços
+      responses:
+        '200':
+          description: Lista de serviços
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ServiceItem'
+    post:
+      tags: [Serviços]
+      summary: Cadastrar serviço no catálogo
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [description, base_price]
+              properties:
+                description:
+                  type: string
+                  example: Troca de óleo
+                base_price:
+                  type: number
+                  example: 150.00
+                estimated_time_minutes:
+                  type: integer
+                  default: 0
+                  example: 60
+            example:
+              description: Troca de óleo
+              base_price: 150.00
+              estimated_time_minutes: 60
+      responses:
+        '201':
+          description: Serviço criado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceItem'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /service-items/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+    get:
+      tags: [Serviços]
+      summary: Buscar serviço por ID
+      responses:
+        '200':
+          description: Serviço encontrado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceItem'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    put:
+      tags: [Serviços]
+      summary: Atualizar serviço
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [description, base_price]
+              properties:
+                description:
+                  type: string
+                  example: Troca de óleo sintético
+                base_price:
+                  type: number
+                  example: 180.00
+                estimated_time_minutes:
+                  type: integer
+                  example: 75
+      responses:
+        '200':
+          description: Serviço atualizado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceItem'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      tags: [Serviços]
+      summary: Remover serviço do catálogo
+      responses:
+        '204':
+          description: Serviço removido
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  # ── Ordens de Serviço ─────────────────────────────────────────────────────────
+  /service-orders:
+    get:
+      tags: [Ordens de Serviço]
+      summary: Listar todas as ordens de serviço
+      responses:
+        '200':
+          description: Lista de ordens
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ServiceOrder'
+    post:
+      tags: [Ordens de Serviço]
+      summary: Criar nova ordem de serviço (status inicial RECEIVED)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [customer_id, vehicle_id]
+              properties:
+                customer_id:
+                  type: string
+                  format: uuid
+                vehicle_id:
+                  type: string
+                  format: uuid
+            example:
+              customer_id: 3fa85f64-5717-4562-b3fc-2c963f66afa6
+              vehicle_id: 8b1e4d07-1234-4000-a000-000000000001
+      responses:
+        '201':
+          description: Ordem criada com status RECEIVED
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceOrder'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+
+  /service-orders/status:
+    get:
+      tags: [Ordens de Serviço]
+      summary: Consulta pública de status por CPF/CNPJ e placa (sem autenticação)
+      security: []
+      parameters:
+        - name: document
+          in: query
+          required: true
+          schema:
+            type: string
+          example: "52998224725"
+          description: CPF ou CNPJ (apenas dígitos)
+        - name: license_plate
+          in: query
+          required: true
+          schema:
+            type: string
+          example: ABC1234
+          description: Placa sem hífen
+        - name: status
+          in: query
+          required: false
+          schema:
+            $ref: '#/components/schemas/OrderStatus'
+          description: Filtro opcional por status
+      responses:
+        '200':
+          description: Ordens encontradas
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ServiceOrder'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /service-orders/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+    get:
+      tags: [Ordens de Serviço]
+      summary: Buscar ordem por ID
+      responses:
+        '200':
+          description: Ordem encontrada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceOrder'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /service-orders/{id}/items:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+    post:
+      tags: [Ordens de Serviço]
+      summary: Adicionar serviços e peças à ordem
+      description: |
+        Adiciona serviços e peças a uma ordem de serviço existente.
+        A adição de peças valida o estoque disponível e decrementa atomicamente
+        dentro de uma transação de banco de dados.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                service_item_ids:
+                  type: array
+                  items:
+                    type: string
+                    format: uuid
+                  example: ["svc-uuid-1", "svc-uuid-2"]
+                parts:
+                  type: array
+                  items:
+                    type: object
+                    required: [part_id, quantity]
+                    properties:
+                      part_id:
+                        type: string
+                        format: uuid
+                      quantity:
+                        type: integer
+                        minimum: 1
+            example:
+              service_item_ids: ["3fa85f64-5717-4562-b3fc-2c963f66afa6"]
+              parts:
+                - part_id: "8b1e4d07-0000-4000-a000-000000000001"
+                  quantity: 2
+      responses:
+        '200':
+          description: Itens adicionados com sucesso
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceOrder'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          description: Estoque insuficiente ou regra de negócio violada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /service-orders/{id}/status:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+    patch:
+      tags: [Ordens de Serviço]
+      summary: Alterar status da ordem de serviço
+      description: |
+        **Transições válidas (máquina de estados):**
+
+        ```
+        RECEIVED → DIAGNOSIS → AWAITING_APPROVAL → EXECUTING → FINISHED → DELIVERED
+        ```
+
+        - `DIAGNOSIS`: inicia o diagnóstico do veículo
+        - `AWAITING_APPROVAL`: envia orçamento para aprovação (calcula total)
+        - `EXECUTING`: aprova o orçamento e inicia execução
+        - `FINISHED`: finaliza a execução dos serviços
+        - `DELIVERED`: entrega o veículo ao cliente
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status]
+              properties:
+                status:
+                  $ref: '#/components/schemas/OrderStatus'
+            example:
+              status: DIAGNOSIS
+      responses:
+        '200':
+          description: Status alterado com sucesso
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceOrder'
+        '400':
+          description: Status inválido
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          description: Transição de status inválida
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
