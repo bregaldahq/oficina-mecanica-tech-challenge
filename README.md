@@ -317,8 +317,4 @@ Análise completa em [SECURITY_REPORT.md](SECURITY_REPORT.md).
 
 ---
 
-## Leitura Adicional
 
-- [IMPLEMENTATION_NOTES.md](IMPLEMENTATION_NOTES.md) — decisões técnicas detalhadas e refinamentos aplicados
-- [SECURITY_REPORT.md](SECURITY_REPORT.md) — análise de vulnerabilidades e mitigações
-- [swagger.yaml](swagger.yaml) — especificação OpenAPI 3.0 completa
