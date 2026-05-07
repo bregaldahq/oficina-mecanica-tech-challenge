@@ -13,6 +13,7 @@ class AuthMiddleware
     ) {
     }
 
+    /** @return array<string, mixed> */
     public function handle(): array
     {
         $header = $_SERVER['HTTP_AUTHORIZATION'] ?? '';

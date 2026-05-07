@@ -57,13 +57,16 @@ class JwtProviderTest extends TestCase
         $this->expectExceptionMessageMatches('/expir/i');
 
         // Build a token with exp in the past by manipulating the payload part
-        $header  = $this->base64urlEncode(json_encode(['alg' => 'HS256', 'typ' => 'JWT']));
-        $payload = $this->base64urlEncode(json_encode([
+        $headerJson  = json_encode(['alg' => 'HS256', 'typ' => 'JWT']);
+        $payloadJson = json_encode([
             'sub' => 'admin',
             'iss' => 'oficina-mecanica-api',
             'iat' => time() - 7200,
-            'exp' => time() - 3600, // expired 1 hour ago
-        ]));
+            'exp' => time() - 3600,
+        ]);
+        assert($headerJson !== false && $payloadJson !== false);
+        $header    = $this->base64urlEncode($headerJson);
+        $payload   = $this->base64urlEncode($payloadJson);
         $secret    = 'test-secret-key-for-unit-tests';
         $signature = $this->base64urlEncode(hash_hmac('sha256', "{$header}.{$payload}", $secret, true));
 

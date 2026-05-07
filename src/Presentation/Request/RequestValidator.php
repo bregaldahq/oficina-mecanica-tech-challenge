@@ -6,6 +6,7 @@ namespace App\Presentation\Request;
 
 class RequestValidator
 {
+    /** @param array<string, mixed> $body */
     public static function requireString(array $body, string $field, int $maxLen = 255): string
     {
         if (!isset($body[$field]) || !is_string($body[$field]) || trim($body[$field]) === '') {
@@ -18,6 +19,7 @@ class RequestValidator
         return $value;
     }
 
+    /** @param array<string, mixed> $body */
     public static function requireFloat(array $body, string $field): float
     {
         if (!isset($body[$field]) || !is_numeric($body[$field])) {
@@ -26,6 +28,7 @@ class RequestValidator
         return (float)$body[$field];
     }
 
+    /** @param array<string, mixed> $body */
     public static function requireInt(array $body, string $field): int
     {
         if (!isset($body[$field]) || !is_numeric($body[$field])) {
@@ -34,6 +37,7 @@ class RequestValidator
         return (int)$body[$field];
     }
 
+    /** @param array<string, mixed> $body */
     public static function optionalString(array $body, string $field, ?string $default = null): ?string
     {
         if (!isset($body[$field]) || !is_string($body[$field]) || trim($body[$field]) === '') {
@@ -42,6 +46,7 @@ class RequestValidator
         return trim($body[$field]);
     }
 
+    /** @param array<string, mixed> $body */
     public static function optionalInt(array $body, string $field, int $default = 0): int
     {
         if (!isset($body[$field]) || !is_numeric($body[$field])) {

@@ -15,6 +15,7 @@ class GetServiceOrderByClientUseCase
     ) {
     }
 
+    /** @return array<int, array<string, mixed>> */
     public function execute(string $document, string $licensePlate, ?string $status = null): array
     {
         $doc   = new Document($document);

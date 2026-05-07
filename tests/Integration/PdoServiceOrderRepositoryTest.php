@@ -190,6 +190,7 @@ class PdoServiceOrderRepositoryTest extends TestCase
         $this->repo->save($order);
 
         $updated = $this->partRepo->findById('p-1');
+        $this->assertNotNull($updated);
         $this->assertSame(7, $updated->getStockQuantity());
     }
 
@@ -207,6 +208,7 @@ class PdoServiceOrderRepositoryTest extends TestCase
         $this->repo->updateStatus($order);
 
         $found = $this->repo->findById('order-1');
+        $this->assertNotNull($found);
         $this->assertSame('DIAGNOSIS', $found->getStatus());
     }
 

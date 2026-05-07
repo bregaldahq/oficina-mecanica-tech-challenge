@@ -30,6 +30,7 @@ class PdoPartRepository implements PartRepositoryInterface
     public function findAll(): array
     {
         $stmt = $this->pdo->query('SELECT * FROM parts_inventory ORDER BY description');
+        assert($stmt !== false);
         return array_map([$this, 'hydrate'], $stmt->fetchAll());
     }
 
@@ -66,6 +67,7 @@ class PdoPartRepository implements PartRepositoryInterface
         $stmt->execute([':id' => $id]);
     }
 
+    /** @param array<string, mixed> $row */
     private function hydrate(array $row): Part
     {
         return Part::create(

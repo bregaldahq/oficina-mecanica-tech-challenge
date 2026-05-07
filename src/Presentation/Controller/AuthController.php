@@ -67,6 +67,7 @@ class AuthController
         return true;
     }
 
+    /** @return array<string, mixed> */
     private function parseBody(): array
     {
         $raw = file_get_contents('php://input');

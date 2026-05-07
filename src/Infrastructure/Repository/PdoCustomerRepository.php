@@ -40,6 +40,7 @@ class PdoCustomerRepository implements CustomerRepositoryInterface
     public function findAll(): array
     {
         $stmt = $this->pdo->query('SELECT * FROM customers ORDER BY name');
+        assert($stmt !== false);
         return array_map([$this, 'hydrate'], $stmt->fetchAll());
     }
 
@@ -72,6 +73,7 @@ class PdoCustomerRepository implements CustomerRepositoryInterface
         $stmt->execute([':id' => $id]);
     }
 
+    /** @param array<string, mixed> $row */
     private function hydrate(array $row): Customer
     {
         return Customer::create(

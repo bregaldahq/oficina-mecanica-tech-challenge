@@ -24,7 +24,11 @@ class EnvLoader
             return;
         }
 
-        foreach (file($path, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) as $line) {
+        $lines = file($path, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+        if ($lines === false) {
+            return;
+        }
+        foreach ($lines as $line) {
             if (str_starts_with(trim($line), '#') || !str_contains($line, '=')) {
                 continue;
             }

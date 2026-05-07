@@ -51,6 +51,7 @@ class Part
         $this->stockQuantity -= $quantity;
     }
 
+    /** @return array<string, mixed> */
     public function toArray(): array
     {
         return [

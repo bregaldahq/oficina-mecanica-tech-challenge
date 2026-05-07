@@ -59,7 +59,7 @@ class PdoServiceOrderRepository implements ServiceOrderRepositoryInterface
              JOIN vehicles  v ON v.id = so.vehicle_id
              ORDER BY so.created_at DESC'
         );
-
+        assert($stmt !== false);
         return array_map(fn(array $row) => $this->hydrateWithItems($row), $stmt->fetchAll());
     }
 
@@ -188,6 +188,7 @@ class PdoServiceOrderRepository implements ServiceOrderRepositoryInterface
         $stmt->execute([':status' => $order->getStatus(), ':id' => $order->getId()]);
     }
 
+    /** @param array<string, mixed> $row */
     private function hydrateWithItems(array $row): ServiceOrder
     {
         $customer = Customer::create(

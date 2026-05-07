@@ -12,7 +12,7 @@ final class Document
 
     public function __construct(string $value)
     {
-        $digits = preg_replace('/\D/', '', $value);
+        $digits = (string)preg_replace('/\D/', '', $value);
 
         if (strlen($digits) === 11) {
             if (!$this->isValidCpf($digits)) {

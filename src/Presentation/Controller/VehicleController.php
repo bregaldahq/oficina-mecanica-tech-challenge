@@ -27,6 +27,7 @@ class VehicleController
         echo json_encode(array_map(fn($v) => $v->toArray(), $this->vehicleRepository->findAll()));
     }
 
+    /** @param array<string, string> $params */
     public function show(array $params): void
     {
         $vehicle = $this->vehicleRepository->findById($params['id']);
@@ -77,6 +78,7 @@ class VehicleController
         }
     }
 
+    /** @param array<string, string> $params */
     public function update(array $params): void
     {
         $vehicle = $this->vehicleRepository->findById($params['id']);
@@ -112,6 +114,7 @@ class VehicleController
         }
     }
 
+    /** @param array<string, string> $params */
     public function destroy(array $params): void
     {
         $vehicle = $this->vehicleRepository->findById($params['id']);
@@ -125,6 +128,7 @@ class VehicleController
         http_response_code(204);
     }
 
+    /** @return array<string, mixed> */
     private function parseBody(): array
     {
         $raw = file_get_contents('php://input');

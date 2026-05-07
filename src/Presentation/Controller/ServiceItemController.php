@@ -23,6 +23,7 @@ class ServiceItemController
         echo json_encode(array_map(fn($i) => $i->toArray(), $this->repository->findAll()));
     }
 
+    /** @param array<string, string> $params */
     public function show(array $params): void
     {
         $item = $this->repository->findById($params['id']);
@@ -51,6 +52,7 @@ class ServiceItemController
         echo json_encode($item->toArray());
     }
 
+    /** @param array<string, string> $params */
     public function update(array $params): void
     {
         $item = $this->repository->findById($params['id']);
@@ -72,6 +74,7 @@ class ServiceItemController
         echo json_encode($updated->toArray());
     }
 
+    /** @param array<string, string> $params */
     public function destroy(array $params): void
     {
         $item = $this->repository->findById($params['id']);
@@ -92,6 +95,7 @@ class ServiceItemController
         echo json_encode($data);
     }
 
+    /** @return array<string, mixed> */
     private function parseBody(): array
     {
         $raw = file_get_contents('php://input');

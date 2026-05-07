@@ -37,6 +37,7 @@ class ServiceOrderController
         echo json_encode($orders);
     }
 
+    /** @param array<string, string> $params */
     public function show(array $params): void
     {
         try {
@@ -76,6 +77,7 @@ class ServiceOrderController
         }
     }
 
+    /** @param array<string, string> $params */
     public function addItems(array $params): void
     {
         $body = $this->parseBody();
@@ -101,6 +103,7 @@ class ServiceOrderController
         }
     }
 
+    /** @param array<string, string> $params */
     public function changeStatus(array $params): void
     {
         $body = $this->parseBody();
@@ -153,6 +156,7 @@ class ServiceOrderController
         }
     }
 
+    /** @return array<string, mixed> */
     private function parseBody(): array
     {
         $raw = file_get_contents('php://input');

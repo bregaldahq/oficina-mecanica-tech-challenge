@@ -23,7 +23,7 @@ final class LicensePlate
             throw new InvalidLicensePlateException("Placa inválida: {$value}. Use o formato ABC-1234 ou ABC1D23.");
         }
 
-        $this->value = preg_replace('/[^A-Z0-9]/', '', $normalized);
+        $this->value = (string)preg_replace('/[^A-Z0-9]/', '', $normalized);
     }
 
     public function getValue(): string

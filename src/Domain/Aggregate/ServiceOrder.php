@@ -193,6 +193,7 @@ class ServiceOrder
         $this->recordEvent(new ServiceOrderStatusChangedEvent($this->id, self::STATUS_FINISHED, self::STATUS_DELIVERED));
     }
 
+    /** @return array<string, mixed> */
     public function toArray(): array
     {
         return [

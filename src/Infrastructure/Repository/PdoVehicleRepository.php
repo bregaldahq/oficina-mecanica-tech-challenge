@@ -47,6 +47,7 @@ class PdoVehicleRepository implements VehicleRepositoryInterface
     public function findAll(): array
     {
         $stmt = $this->pdo->query('SELECT * FROM vehicles ORDER BY brand, model');
+        assert($stmt !== false);
         return array_map([$this, 'hydrate'], $stmt->fetchAll());
     }
 
@@ -85,6 +86,7 @@ class PdoVehicleRepository implements VehicleRepositoryInterface
         $stmt->execute([':id' => $id]);
     }
 
+    /** @param array<string, mixed> $row */
     private function hydrate(array $row): Vehicle
     {
         return Vehicle::create(

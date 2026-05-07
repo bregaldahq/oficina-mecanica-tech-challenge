@@ -55,7 +55,7 @@ class Router
 
     public function dispatch(string $method, string $uri): void
     {
-        $path = parse_url($uri, PHP_URL_PATH);
+        $path = (string)(parse_url($uri, PHP_URL_PATH) ?? '/');
         $path = rtrim($path, '/') ?: '/';
 
         foreach ($this->routes as $route) {
@@ -79,6 +79,7 @@ class Router
         echo json_encode(['error' => 'Rota não encontrada.']);
     }
 
+    /** @return array<string, string>|null */
     private function matchPattern(string $pattern, string $path): ?array
     {
         $regex = preg_replace('/\{([a-zA-Z_]+)\}/', '(?P<$1>[^/]+)', $pattern);

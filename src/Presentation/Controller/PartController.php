@@ -23,6 +23,7 @@ class PartController
         echo json_encode(array_map(fn($p) => $p->toArray(), $this->repository->findAll()));
     }
 
+    /** @param array<string, string> $params */
     public function show(array $params): void
     {
         $part = $this->repository->findById($params['id']);
@@ -51,6 +52,7 @@ class PartController
         echo json_encode($part->toArray());
     }
 
+    /** @param array<string, string> $params */
     public function update(array $params): void
     {
         $part = $this->repository->findById($params['id']);
@@ -71,6 +73,7 @@ class PartController
         echo json_encode($updated->toArray());
     }
 
+    /** @param array<string, string> $params */
     public function updateStock(array $params): void
     {
         $part = $this->repository->findById($params['id']);
@@ -96,6 +99,7 @@ class PartController
         echo json_encode($newPart->toArray());
     }
 
+    /** @param array<string, string> $params */
     public function destroy(array $params): void
     {
         $part = $this->repository->findById($params['id']);
@@ -109,6 +113,7 @@ class PartController
         http_response_code(204);
     }
 
+    /** @return array<string, mixed> */
     private function parseBody(): array
     {
         $raw = file_get_contents('php://input');

@@ -25,6 +25,7 @@ class CustomerController
         echo json_encode(array_map(fn($c) => $c->toArray(), $this->repository->findAll()));
     }
 
+    /** @param array<string, string> $params */
     public function show(array $params): void
     {
         $customer = $this->repository->findById($params['id']);
@@ -65,6 +66,7 @@ class CustomerController
         }
     }
 
+    /** @param array<string, string> $params */
     public function update(array $params): void
     {
         $customer = $this->repository->findById($params['id']);
@@ -84,6 +86,7 @@ class CustomerController
         echo json_encode($updated->toArray());
     }
 
+    /** @param array<string, string> $params */
     public function destroy(array $params): void
     {
         $customer = $this->repository->findById($params['id']);
@@ -97,6 +100,7 @@ class CustomerController
         http_response_code(204);
     }
 
+    /** @return array<string, mixed> */
     private function parseBody(): array
     {
         $raw = file_get_contents('php://input');

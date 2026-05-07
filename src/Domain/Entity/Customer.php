@@ -35,6 +35,7 @@ class Customer
         return $this->document;
     }
 
+    /** @return array<string, mixed> */
     public function toArray(): array
     {
         return [

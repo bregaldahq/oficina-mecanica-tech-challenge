@@ -17,6 +17,7 @@ class JwtProvider
         $this->expiration = (int)($_ENV['JWT_EXPIRATION'] ?? 3600);
     }
 
+    /** @param array<string, mixed> $payload */
     public function generate(array $payload): string
     {
         $now = time();
@@ -27,13 +28,17 @@ class JwtProvider
             'exp' => $now + $this->expiration,
         ]);
 
-        $header    = $this->base64urlEncode(json_encode(['alg' => 'HS256', 'typ' => 'JWT']));
-        $body      = $this->base64urlEncode(json_encode($claims));
+        $headerJson = json_encode(['alg' => 'HS256', 'typ' => 'JWT']);
+        $bodyJson   = json_encode($claims);
+        assert($headerJson !== false && $bodyJson !== false);
+        $header    = $this->base64urlEncode($headerJson);
+        $body      = $this->base64urlEncode($bodyJson);
         $signature = $this->base64urlEncode(hash_hmac('sha256', "{$header}.{$body}", $this->secret, true));
 
         return "{$header}.{$body}.{$signature}";
     }
 
+    /** @return array<string, mixed> */
     public function validate(string $token): array
     {
         $parts = explode('.', $token);

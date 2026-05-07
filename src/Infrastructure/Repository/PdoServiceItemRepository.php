@@ -30,6 +30,7 @@ class PdoServiceItemRepository implements ServiceItemRepositoryInterface
     public function findAll(): array
     {
         $stmt = $this->pdo->query('SELECT * FROM service_catalog ORDER BY description');
+        assert($stmt !== false);
         return array_map([$this, 'hydrate'], $stmt->fetchAll());
     }
 
@@ -73,6 +74,7 @@ class PdoServiceItemRepository implements ServiceItemRepositoryInterface
      * quantas vezes foi executado, tempo estimado unitário e
      * total acumulado de minutos para os serviços já realizados.
      */
+    /** @return array<int, array<string, mixed>> */
     public function getMetrics(): array
     {
         $stmt = $this->pdo->query(
@@ -87,9 +89,13 @@ class PdoServiceItemRepository implements ServiceItemRepositoryInterface
              ORDER BY times_executed DESC, sc.description ASC'
         );
 
-        return $stmt->fetchAll();
+        assert($stmt !== false);
+        /** @var array<int, array<string, mixed>> $result */
+        $result = $stmt->fetchAll();
+        return $result;
     }
 
+    /** @param array<string, mixed> $row */
     private function hydrate(array $row): ServiceItem
     {
         return ServiceItem::create(

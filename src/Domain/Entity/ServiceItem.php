@@ -43,6 +43,7 @@ class ServiceItem
         return $this->estimatedTimeMinutes;
     }
 
+    /** @return array<string, mixed> */
     public function toArray(): array
     {
         return [

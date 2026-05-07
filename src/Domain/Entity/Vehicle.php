@@ -66,6 +66,7 @@ class Vehicle
         return $this->year;
     }
 
+    /** @return array<string, mixed> */
     public function toArray(): array
     {
         return [
