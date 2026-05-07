@@ -22,7 +22,7 @@ class CustomerController
     public function index(): void
     {
         http_response_code(200);
-        echo json_encode(array_map(fn($c) => $c->toArray(), $this->repository->findAll()));
+        echo json_encode(array_map(fn ($c) => $c->toArray(), $this->repository->findAll()));
     }
 
     /** @param array<string, string> $params */

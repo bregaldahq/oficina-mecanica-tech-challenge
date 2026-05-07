@@ -9,7 +9,7 @@ class EnvLoader
     /** @param string[] $required */
     public static function require(array $required): void
     {
-        $missing = array_filter($required, fn(string $key) => empty($_ENV[$key]));
+        $missing = array_filter($required, fn (string $key) => empty($_ENV[$key]));
 
         if ($missing !== []) {
             throw new \RuntimeException(
@@ -32,7 +32,7 @@ class EnvLoader
             if (str_starts_with(trim($line), '#') || !str_contains($line, '=')) {
                 continue;
             }
-            [$key, $value] = explode('=', $line, 2);
+            [$key, $value]    = explode('=', $line, 2);
             $_ENV[trim($key)] = trim($value);
         }
     }

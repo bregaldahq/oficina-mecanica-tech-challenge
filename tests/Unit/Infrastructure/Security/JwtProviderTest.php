@@ -44,8 +44,8 @@ class JwtProviderTest extends TestCase
         $this->expectException(DomainException::class);
         $this->expectExceptionMessageMatches('/assinatura/i');
 
-        $token  = $this->provider->generate(['sub' => 'admin']);
-        $parts  = explode('.', $token);
+        $token    = $this->provider->generate(['sub' => 'admin']);
+        $parts    = explode('.', $token);
         $parts[2] = 'invalidsignature';
 
         $this->provider->validate(implode('.', $parts));

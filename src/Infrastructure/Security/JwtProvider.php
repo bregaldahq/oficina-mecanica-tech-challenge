@@ -13,7 +13,7 @@ class JwtProvider
 
     public function __construct()
     {
-        $this->secret     = $_ENV['JWT_SECRET']     ?? 'default-secret-change-me';
+        $this->secret     = $_ENV['JWT_SECRET'] ?? 'default-secret-change-me';
         $this->expiration = (int)($_ENV['JWT_EXPIRATION'] ?? 3600);
     }
 

@@ -24,7 +24,7 @@ class VehicleController
     public function index(): void
     {
         http_response_code(200);
-        echo json_encode(array_map(fn($v) => $v->toArray(), $this->vehicleRepository->findAll()));
+        echo json_encode(array_map(fn ($v) => $v->toArray(), $this->vehicleRepository->findAll()));
     }
 
     /** @param array<string, string> $params */

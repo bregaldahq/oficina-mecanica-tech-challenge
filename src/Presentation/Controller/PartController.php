@@ -20,7 +20,7 @@ class PartController
     public function index(): void
     {
         http_response_code(200);
-        echo json_encode(array_map(fn($p) => $p->toArray(), $this->repository->findAll()));
+        echo json_encode(array_map(fn ($p) => $p->toArray(), $this->repository->findAll()));
     }
 
     /** @param array<string, string> $params */
@@ -62,9 +62,9 @@ class PartController
             return;
         }
 
-        $body    = $this->parseBody();
-        $desc    = RequestValidator::requireString($body, 'description');
-        $price   = RequestValidator::requireFloat($body, 'price');
+        $body  = $this->parseBody();
+        $desc  = RequestValidator::requireString($body, 'description');
+        $price = RequestValidator::requireFloat($body, 'price');
 
         $updated = Part::create($part->getId(), $desc, $price, $part->getStockQuantity());
         $this->repository->update($updated);

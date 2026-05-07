@@ -32,7 +32,7 @@ class ServiceOrderController
 
     public function index(): void
     {
-        $orders = array_map(fn($o) => $o->toArray(), $this->orderRepository->findAll());
+        $orders = array_map(fn ($o) => $o->toArray(), $this->orderRepository->findAll());
         http_response_code(200);
         echo json_encode($orders);
     }
@@ -86,7 +86,7 @@ class ServiceOrderController
             $order = $this->addItemsUseCase->execute(new AddItemsInputDTO(
                 orderId: $params['id'],
                 serviceItemIds: $body['service_item_ids'] ?? [],
-                parts: $body['parts'] ?? [],
+                parts: $body['parts']                     ?? [],
             ));
 
             http_response_code(200);

@@ -54,8 +54,8 @@ final class Document
         for ($i = 0; $i < 9; $i++) {
             $sum += (int)$digits[$i] * (10 - $i);
         }
-        $remainder   = $sum % 11;
-        $firstCheck  = $remainder < 2 ? 0 : 11 - $remainder;
+        $remainder  = $sum % 11;
+        $firstCheck = $remainder < 2 ? 0 : 11 - $remainder;
 
         if ((int)$digits[9] !== $firstCheck) {
             return false;
@@ -82,8 +82,8 @@ final class Document
         for ($i = 0; $i < 12; $i++) {
             $sum += (int)$digits[$i] * $weights1[$i];
         }
-        $remainder   = $sum % 11;
-        $firstCheck  = $remainder < 2 ? 0 : 11 - $remainder;
+        $remainder  = $sum % 11;
+        $firstCheck = $remainder < 2 ? 0 : 11 - $remainder;
 
         if ((int)$digits[12] !== $firstCheck) {
             return false;

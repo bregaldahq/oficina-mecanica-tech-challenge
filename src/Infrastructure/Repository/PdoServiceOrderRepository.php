@@ -60,7 +60,7 @@ class PdoServiceOrderRepository implements ServiceOrderRepositoryInterface
              ORDER BY so.created_at DESC'
         );
         assert($stmt !== false);
-        return array_map(fn(array $row) => $this->hydrateWithItems($row), $stmt->fetchAll());
+        return array_map(fn (array $row) => $this->hydrateWithItems($row), $stmt->fetchAll());
     }
 
     public function findByDocumentAndLicensePlate(string $document, string $licensePlate, ?string $status = null): array
@@ -86,7 +86,7 @@ class PdoServiceOrderRepository implements ServiceOrderRepositoryInterface
         $stmt = $this->pdo->prepare($sql);
         $stmt->execute($params);
 
-        return array_map(fn(array $row) => $this->hydrateWithItems($row), $stmt->fetchAll());
+        return array_map(fn (array $row) => $this->hydrateWithItems($row), $stmt->fetchAll());
     }
 
     public function save(ServiceOrder $order): void
@@ -151,7 +151,7 @@ class PdoServiceOrderRepository implements ServiceOrderRepositoryInterface
 
             foreach ($order->getPartsWithQuantity() as $item) {
                 /** @var Part $part */
-                $part = $item['part'];
+                $part     = $item['part'];
                 $quantity = $item['quantity'];
 
                 $stmt = $this->pdo->prepare(
@@ -206,10 +206,10 @@ class PdoServiceOrderRepository implements ServiceOrderRepositoryInterface
             year: (int)$row['v_year'],
         );
 
-        $services = $this->loadServices($row['id']);
+        $services          = $this->loadServices($row['id']);
         $partsWithQuantity = $this->loadParts($row['id']);
-        $totalAmount = array_sum(array_map(fn(ServiceItem $s) => $s->getBasePrice(), $services))
-            + array_sum(array_map(fn(array $p) => $p['part']->getPrice() * $p['quantity'], $partsWithQuantity));
+        $totalAmount       = array_sum(array_map(fn (ServiceItem $s) => $s->getBasePrice(), $services))
+            + array_sum(array_map(fn (array $p) => $p['part']->getPrice() * $p['quantity'], $partsWithQuantity));
 
         return ServiceOrder::reconstitute(
             id: $row['id'],
@@ -234,7 +234,7 @@ class PdoServiceOrderRepository implements ServiceOrderRepositoryInterface
         );
         $stmt->execute([':id' => $orderId]);
 
-        return array_map(fn(array $row) => ServiceItem::create(
+        return array_map(fn (array $row) => ServiceItem::create(
             id: $row['sc_id'],
             description: $row['description'],
             basePrice: (float)$row['price_charged'],
@@ -254,8 +254,8 @@ class PdoServiceOrderRepository implements ServiceOrderRepositoryInterface
         );
         $stmt->execute([':id' => $orderId]);
 
-        return array_map(fn(array $row) => [
-            'part'     => Part::create(
+        return array_map(fn (array $row) => [
+            'part' => Part::create(
                 id: $row['pi_id'],
                 description: $row['description'],
                 price: (float)$row['unit_price_charged'],

@@ -46,7 +46,7 @@ class ServiceOrder
 
     public static function create(string $id, Customer $customer, Vehicle $vehicle): self
     {
-        $order = new self($id, $customer, $vehicle, self::STATUS_RECEIVED, new \DateTimeImmutable());
+        $order        = new self($id, $customer, $vehicle, self::STATUS_RECEIVED, new \DateTimeImmutable());
         $order->isNew = true;
         $order->recordEvent(new ServiceOrderCreatedEvent($id, $customer->getId(), $vehicle->getId()));
         return $order;
@@ -69,9 +69,9 @@ class ServiceOrder
         array $services = [],
         array $partsWithQuantity = [],
     ): self {
-        $order = new self($id, $customer, $vehicle, $status, $createdAt);
-        $order->totalAmount = $totalAmount;
-        $order->services = $services;
+        $order                    = new self($id, $customer, $vehicle, $status, $createdAt);
+        $order->totalAmount       = $totalAmount;
+        $order->services          = $services;
         $order->partsWithQuantity = $partsWithQuantity;
         return $order;
     }
@@ -126,7 +126,7 @@ class ServiceOrder
     /** @return DomainEventInterface[] */
     public function releaseEvents(): array
     {
-        $events = $this->domainEvents;
+        $events             = $this->domainEvents;
         $this->domainEvents = [];
         return $events;
     }
@@ -148,10 +148,10 @@ class ServiceOrder
 
     public function calculateTotalAmount(): float
     {
-        $servicesTotal = array_sum(array_map(fn(ServiceItem $s) => $s->getBasePrice(), $this->services));
+        $servicesTotal = array_sum(array_map(fn (ServiceItem $s) => $s->getBasePrice(), $this->services));
 
         $partsTotal = array_sum(
-            array_map(fn(array $p) => $p['part']->getPrice() * $p['quantity'], $this->partsWithQuantity)
+            array_map(fn (array $p) => $p['part']->getPrice() * $p['quantity'], $this->partsWithQuantity)
         );
 
         return round($servicesTotal + $partsTotal, 2);
@@ -168,7 +168,7 @@ class ServiceOrder
     {
         $this->requireStatus(self::STATUS_DIAGNOSIS, self::STATUS_AWAITING_APPROVAL);
         $this->totalAmount = $this->calculateTotalAmount();
-        $this->status = self::STATUS_AWAITING_APPROVAL;
+        $this->status      = self::STATUS_AWAITING_APPROVAL;
         $this->recordEvent(new ServiceOrderStatusChangedEvent($this->id, self::STATUS_DIAGNOSIS, self::STATUS_AWAITING_APPROVAL));
     }
 
@@ -197,12 +197,12 @@ class ServiceOrder
     public function toArray(): array
     {
         return [
-            'id'           => $this->id,
-            'customer'     => $this->customer->toArray(),
-            'vehicle'      => $this->vehicle->toArray(),
-            'status'       => $this->status,
-            'services'     => array_map(fn(ServiceItem $s) => $s->toArray(), $this->services),
-            'parts'        => array_map(fn(array $p) => array_merge(
+            'id'       => $this->id,
+            'customer' => $this->customer->toArray(),
+            'vehicle'  => $this->vehicle->toArray(),
+            'status'   => $this->status,
+            'services' => array_map(fn (ServiceItem $s) => $s->toArray(), $this->services),
+            'parts'    => array_map(fn (array $p) => array_merge(
                 $p['part']->toArray(),
                 ['quantity' => $p['quantity']]
             ), $this->partsWithQuantity),

@@ -20,7 +20,7 @@ class ServiceItemController
     public function index(): void
     {
         http_response_code(200);
-        echo json_encode(array_map(fn($i) => $i->toArray(), $this->repository->findAll()));
+        echo json_encode(array_map(fn ($i) => $i->toArray(), $this->repository->findAll()));
     }
 
     /** @param array<string, string> $params */
@@ -62,10 +62,10 @@ class ServiceItemController
             return;
         }
 
-        $body    = $this->parseBody();
-        $desc    = RequestValidator::requireString($body, 'description');
-        $price   = RequestValidator::requireFloat($body, 'base_price');
-        $time    = RequestValidator::optionalInt($body, 'estimated_time_minutes', $item->getEstimatedTimeMinutes());
+        $body  = $this->parseBody();
+        $desc  = RequestValidator::requireString($body, 'description');
+        $price = RequestValidator::requireFloat($body, 'base_price');
+        $time  = RequestValidator::optionalInt($body, 'estimated_time_minutes', $item->getEstimatedTimeMinutes());
 
         $updated = ServiceItem::create($item->getId(), $desc, $price, $time);
         $this->repository->update($updated);

@@ -30,7 +30,7 @@ class PdoConnection
                 self::$instance = new PDO($dsn, $user, $pass, [
                     // ATTR_EMULATE_PREPARES = false: forces native prepared statements in MySQL,
                     // preventing SQL injection by ensuring values are never concatenated into queries.
-                    PDO::ATTR_EMULATE_PREPARES   => false,
+                    PDO::ATTR_EMULATE_PREPARES => false,
                     // ERRMODE_EXCEPTION: PDO throws PDOException on errors instead of returning false,
                     // ensuring no silent failure goes unhandled.
                     PDO::ATTR_ERRMODE            => PDO::ERRMODE_EXCEPTION,

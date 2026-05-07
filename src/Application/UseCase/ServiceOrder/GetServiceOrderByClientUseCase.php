@@ -27,6 +27,6 @@ class GetServiceOrderByClientUseCase
             $status,
         );
 
-        return array_map(fn($o) => $o->toArray(), $orders);
+        return array_map(fn ($o) => $o->toArray(), $orders);
     }
 }

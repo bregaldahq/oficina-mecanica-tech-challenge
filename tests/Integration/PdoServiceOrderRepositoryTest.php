@@ -7,7 +7,6 @@ namespace Tests\Integration;
 use App\Domain\Aggregate\ServiceOrder;
 use App\Domain\Entity\Customer;
 use App\Domain\Entity\Part;
-use App\Domain\Entity\ServiceItem;
 use App\Domain\Entity\Vehicle;
 use App\Domain\ValueObject\Document;
 use App\Domain\ValueObject\LicensePlate;
@@ -159,7 +158,7 @@ class PdoServiceOrderRepositoryTest extends TestCase
         $order1 = ServiceOrder::create('order-dup', $customer, $vehicle);
         $this->repo->save($order1);
 
-        $order2 = ServiceOrder::create('order-dup', $customer, $vehicle);
+        $order2          = ServiceOrder::create('order-dup', $customer, $vehicle);
         $exceptionThrown = false;
 
         try {

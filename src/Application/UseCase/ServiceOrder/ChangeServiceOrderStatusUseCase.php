@@ -31,8 +31,8 @@ class ChangeServiceOrderStatusUseCase
             'EXECUTING'         => $order->approve(),
             'FINISHED'          => $order->finish(),
             'DELIVERING',
-            'DELIVERED'         => $order->deliver(),
-            default             => throw new DomainException("Status inválido: {$dto->newStatus}"),
+            'DELIVERED' => $order->deliver(),
+            default     => throw new DomainException("Status inválido: {$dto->newStatus}"),
         };
 
         $this->orderRepository->updateStatus($order);

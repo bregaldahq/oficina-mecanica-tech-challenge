@@ -23,4 +23,5 @@ return (new Config())
         'blank_line_after_opening_tag' => true,
     ])
     ->setFinder($finder)
+    ->setRiskyAllowed(true)
     ->setUsingCache(true);
