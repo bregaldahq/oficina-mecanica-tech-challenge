@@ -43,7 +43,7 @@ class ServiceItemController
         $body  = $this->parseBody();
         $desc  = RequestValidator::requireString($body, 'description');
         $price = RequestValidator::requireFloat($body, 'base_price');
-        $time  = RequestValidator::optionalInt($body, 'estimated_time_minutes', 0);
+        $time  = RequestValidator::requireInt($body, 'estimated_time_minutes');
 
         $item = ServiceItem::create($this->uuidGenerator->generate(), $desc, $price, $time);
         $this->repository->save($item);
