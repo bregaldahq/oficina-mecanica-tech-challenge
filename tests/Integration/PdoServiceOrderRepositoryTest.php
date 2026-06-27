@@ -243,4 +243,43 @@ class PdoServiceOrderRepositoryTest extends TestCase
         $results = $this->repo->findByDocumentAndLicensePlate('52998224725', 'ABC1234', 'RECEIVED');
         $this->assertCount(1, $results);
     }
+
+    public function testFindActiveOrderedPrioritizesStatusThenOldestAndExcludesClosed(): void
+    {
+        $this->customerRepo->save($this->makeCustomer());
+        $this->vehicleRepo->save($this->makeVehicle());
+
+        $insert = function (string $id, string $status, string $createdAt): void {
+            $stmt = $this->pdo->prepare(
+                'INSERT INTO service_orders (id, customer_id, vehicle_id, status, total_amount, created_at)
+                 VALUES (:id, :customer_id, :vehicle_id, :status, 0, :created_at)'
+            );
+            $stmt->execute([
+                ':id'          => $id,
+                ':customer_id' => 'cust-1',
+                ':vehicle_id'  => 'veh-1',
+                ':status'      => $status,
+                ':created_at'  => $createdAt,
+            ]);
+        };
+
+        // Inserted shuffled on purpose; closed orders must be excluded entirely.
+        $insert('received-new', 'RECEIVED', '2026-01-05 10:00:00');
+        $insert('received-old', 'RECEIVED', '2026-01-01 10:00:00');
+        $insert('diagnosis', 'DIAGNOSIS', '2026-01-02 10:00:00');
+        $insert('awaiting', 'AWAITING_APPROVAL', '2026-01-03 10:00:00');
+        $insert('executing', 'EXECUTING', '2026-01-04 10:00:00');
+        $insert('finished', 'FINISHED', '2026-01-01 09:00:00');
+        $insert('delivered', 'DELIVERED', '2026-01-01 08:00:00');
+
+        $ids = array_map(fn ($o) => $o->getId(), $this->repo->findActiveOrdered());
+
+        $this->assertSame([
+            'executing',
+            'awaiting',
+            'diagnosis',
+            'received-old',
+            'received-new',
+        ], $ids);
+    }
 }

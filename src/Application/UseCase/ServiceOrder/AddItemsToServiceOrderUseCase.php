@@ -44,9 +44,8 @@ class AddItemsToServiceOrderUseCase
             $order->addPart($part, $partData['quantity']);
         }
 
-        // Persist items + stock decrement (within transaction).
-        // Total is recalculated lazily by sendForApproval(); stored on the order here
-        // so the response reflects the current value.
+        // Persist items + stock decrement (within a transaction). The order keeps its
+        // budget (total_amount) current as items are added, so it is stored here too.
         $this->orderRepository->save($order);
 
         return $order;
