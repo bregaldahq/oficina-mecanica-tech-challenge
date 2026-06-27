@@ -33,6 +33,29 @@ $partRepo        = new \App\Infrastructure\Repository\PdoPartRepository();
 $serviceItemRepo = new \App\Infrastructure\Repository\PdoServiceItemRepository();
 $orderRepo       = new \App\Infrastructure\Repository\PdoServiceOrderRepository($uuid);
 
+$eventDispatcher = new \App\Infrastructure\Event\InMemoryEventDispatcher();
+
+$mailer = new \App\Infrastructure\Notification\SmtpMailer(
+    host: $_ENV['SMTP_HOST']         ?? '',
+    port: (int)($_ENV['SMTP_PORT']   ?? 587),
+    username: $_ENV['SMTP_USERNAME'] ?? '',
+    password: $_ENV['SMTP_PASSWORD'] ?? '',
+    from: $_ENV['MAIL_FROM']         ?? 'no-reply@oficina.local',
+);
+
+$statusNotifier = new \App\Infrastructure\Notification\StatusChangeEmailNotifier(
+    $mailer,
+    $_ENV['MAIL_TO'] ?? '',
+);
+
+// Subscribe the email notifier only when SMTP is configured; otherwise stay silent.
+if (($_ENV['SMTP_HOST'] ?? '') !== '' && ($_ENV['MAIL_TO'] ?? '') !== '') {
+    $eventDispatcher->subscribe(
+        \App\Domain\Event\ServiceOrderStatusChangedEvent::class,
+        static fn (\App\Domain\Event\ServiceOrderStatusChangedEvent $event) => $statusNotifier->handle($event),
+    );
+}
+
 $authController = new \App\Presentation\Controller\AuthController(
     new \App\Application\UseCase\Auth\AuthenticateUseCase($jwtProvider)
 );
@@ -55,9 +78,10 @@ $orderController = new \App\Presentation\Controller\ServiceOrderController(
         $orderRepo, $serviceItemRepo, $partRepo
     ),
     new \App\Application\UseCase\ServiceOrder\GetServiceOrderUseCase($orderRepo),
-    new \App\Application\UseCase\ServiceOrder\ChangeServiceOrderStatusUseCase($orderRepo),
+    new \App\Application\UseCase\ServiceOrder\ChangeServiceOrderStatusUseCase($orderRepo, $eventDispatcher),
     new \App\Application\UseCase\ServiceOrder\GetServiceOrderByClientUseCase($orderRepo),
-    $orderRepo,
+    new \App\Application\UseCase\ServiceOrder\ListServiceOrdersUseCase($orderRepo),
+    new \App\Application\UseCase\ServiceOrder\ReviewBudgetUseCase($orderRepo, $eventDispatcher),
 );
 
 $router = new \App\Presentation\Router\Router();
@@ -67,6 +91,7 @@ $router->setAuthMiddleware($authMiddleware);
 $router->get('/api/health',                fn() => $healthController->check(),            requireAuth: false);
 $router->post('/api/auth/login',           fn() => $authController->login(),              requireAuth: false);
 $router->get('/api/service-orders/status', fn() => $orderController->statusByClient(),    requireAuth: false);
+$router->post('/api/service-orders/{id}/approval', fn($p) => $orderController->reviewBudget($p), requireAuth: false);
 
 // clientes
 $router->get('/api/customers',             fn() => $customerController->index());
