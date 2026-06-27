@@ -182,6 +182,7 @@ components:
         - DIAGNOSIS
         - AWAITING_APPROVAL
         - EXECUTING
+        - REJECTED
         - FINISHED
         - DELIVERED
 
@@ -810,10 +811,15 @@ paths:
   /service-orders:
     get:
       tags: [Ordens de Serviço]
-      summary: Listar todas as ordens de serviço
+      summary: Listar ordens de serviço ativas
+      description: |
+        Retorna as ordens **ativas** ordenadas por prioridade de fluxo
+        (`EXECUTING` > `AWAITING_APPROVAL` > `DIAGNOSIS` > `RECEIVED`) e, dentro de
+        cada status, das mais antigas para as mais recentes. Ordens `FINISHED` e
+        `DELIVERED` são excluídas da listagem (exclusão lógica, não física).
       responses:
         '200':
-          description: Lista de ordens
+          description: Lista de ordens ativas ordenadas
           content:
             application/json:
               schema:
@@ -994,6 +1000,9 @@ paths:
         - `EXECUTING`: aprova o orçamento e inicia execução
         - `FINISHED`: finaliza a execução dos serviços
         - `DELIVERED`: entrega o veículo ao cliente
+
+        Cada mudança de status dispara uma notificação por email quando o SMTP
+        está configurado (`SMTP_HOST`/`MAIL_TO`).
       requestBody:
         required: true
         content:
@@ -1023,6 +1032,74 @@ paths:
           $ref: '#/components/responses/NotFound'
         '422':
           description: Transição de status inválida
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /service-orders/{id}/approval:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+    post:
+      tags: [Ordens de Serviço]
+      summary: Aprovar ou recusar o orçamento (notificação externa)
+      description: |
+        Endpoint para um canal externo notificar a decisão do cliente sobre o
+        orçamento de uma ordem em `AWAITING_APPROVAL`:
+
+        - `approved: true` → aprova e move a ordem para `EXECUTING`
+        - `approved: false` → recusa e move a ordem para `REJECTED`
+
+        Protegido por token compartilhado: quando `WEBHOOK_TOKEN` está configurado,
+        o header `X-Webhook-Token` é obrigatório.
+      security: []
+      parameters:
+        - name: X-Webhook-Token
+          in: header
+          required: false
+          schema:
+            type: string
+          description: Token compartilhado do webhook (obrigatório quando configurado)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [approved]
+              properties:
+                approved:
+                  type: boolean
+                  description: "true aprova (→ EXECUTING); false recusa (→ REJECTED)"
+            example:
+              approved: true
+      responses:
+        '200':
+          description: Decisão aplicada com sucesso
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceOrder'
+        '400':
+          description: Campo "approved" ausente ou inválido
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Token de webhook ausente ou inválido
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          description: Ordem não está em AWAITING_APPROVAL
           content:
             application/json:
               schema:

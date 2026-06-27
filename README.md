@@ -27,12 +27,72 @@ O sistema gerencia o ciclo de vida completo de ordens de serviço automotivas: r
 | Formatação | PHP-CS-Fixer (PSR-12) |
 | Documentação | OpenAPI 3.0 + Swagger UI |
 | Containerização | Docker (multi-stage) + Docker Compose + Nginx |
+| Orquestração | Kubernetes (kind) + Horizontal Pod Autoscaler |
+| Infraestrutura como Código | Terraform |
+| CI/CD | GitHub Actions |
+| Notificações | Email via cliente SMTP próprio (PHP puro) |
 
 ### Por que MySQL?
 
 - **ACID:** Transações garantem que a reserva de estoque e o registro da OS sejam atômicos.
 - **Integridade Referencial:** Chaves estrangeiras impedem que uma OS referencie cliente ou veículo inexistente.
 - **Relações Complexas:** Modelo com 7 tabelas e relações N:M (OS ↔ Peças, OS ↔ Serviços) naturalmente expressas em SQL.
+
+---
+
+## Fase 2 — Evolução Cloud-Native
+
+Esta fase evolui a aplicação da Fase 1 para **qualidade, resiliência e
+escalabilidade**: containerização revisada, orquestração em Kubernetes com
+autoescalonamento, Infraestrutura como Código (Terraform) e pipeline de CI/CD —
+sem abrir mão da Clean Architecture e do TDD.
+
+**Novidades de aplicação:**
+
+- **Listagem de OS ativas** ordenada por prioridade de fluxo
+  (`EXECUTING > AWAITING_APPROVAL > DIAGNOSIS > RECEIVED`, mais antigas primeiro),
+  excluindo logicamente as `FINISHED`/`DELIVERED`.
+- **Aprovação/recusa de orçamento** via webhook externo
+  (`POST /api/service-orders/{id}/approval`), com novo status `REJECTED` e
+  proteção por token (`X-Webhook-Token`).
+- **Notificação por email (SMTP)** a cada mudança de status, via cliente SMTP
+  próprio (sem dependência externa) acionado por eventos de domínio.
+
+### Arquitetura provisionada
+
+```mermaid
+flowchart TB
+    user([Clientes / Integrações]) --> ingress[Ingress · port-forward]
+    subgraph ns["Kubernetes — namespace oficina"]
+        ingress --> svc[Service oficina-api]
+        svc --> nginx
+        subgraph pod["Deployment oficina-api · réplicas 2 a 6"]
+            nginx[Nginx :80] --> fpm[PHP-FPM :9000]
+        end
+        cfg[(ConfigMap)] -. env .-> fpm
+        sec[(Secret)] -. env .-> fpm
+        fpm --> db[(MySQL StatefulSet + PVC)]
+        job[[Job · migração schema.sql]] --> db
+        hpa{{HPA · CPU/Memória}} -. escala .-> pod
+    end
+    fpm -. SMTP .-> mail([Servidor de email])
+```
+
+### Fluxo de deploy (CI/CD)
+
+```mermaid
+flowchart LR
+    push[git push main] --> gha[GitHub Actions]
+    gha --> test[Testes<br/>PHPUnit · PHPStan · CS-Fixer]
+    test --> build[Build imagem produção]
+    build --> ghcr[Push GHCR]
+    ghcr --> deploy[Deploy kind<br/>apply k8s + Job migração]
+    deploy --> smoke[Smoke test /api/health]
+```
+
+O provisionamento local equivalente é feito por **Terraform** (`infra/`): cria o
+cluster kind, builda/carrega a imagem, aplica os manifestos e roda a migração com
+um único `terraform apply`.
 
 ---
 
@@ -79,10 +139,15 @@ Cada transição é um método nomeado no Aggregate Root — nunca um `setStatus
 | `changeToDiagnosis()` | RECEIVED | DIAGNOSIS |
 | `sendForApproval()` | DIAGNOSIS | AWAITING_APPROVAL |
 | `approve()` | AWAITING_APPROVAL | EXECUTING |
+| `reject()` | AWAITING_APPROVAL | REJECTED |
 | `finish()` | EXECUTING | FINISHED |
 | `deliver()` | FINISHED | DELIVERED |
 
 Transições inválidas lançam `InvalidStatusTransitionException`.
+
+> `reject()` encerra a OS quando o orçamento é recusado, exposto pelo endpoint
+> `POST /api/service-orders/{id}/approval`. Toda mudança de status emite um evento
+> de domínio que dispara uma notificação por email (quando o SMTP está configurado).
 
 ### Modelo de Dados
 
@@ -129,6 +194,10 @@ Construtor `private`. O repositório usa `reconstitute()` para rehidratar o agre
 | **Peça** | Item de estoque consumido durante um serviço |
 | **Documento** | CPF (11 dígitos) ou CNPJ (14 dígitos) do cliente |
 | **Placa** | Identificador único do veículo (formato antigo ou Mercosul) |
+
+> O **Domain Storytelling** dos dois fluxos principais (abertura/acompanhamento e
+> diagnóstico → entrega) está documentado em
+> [`docs/DOMAIN-STORYTELLING.md`](docs/DOMAIN-STORYTELLING.md).
 
 ---
 
@@ -185,9 +254,12 @@ oficina-mecanica-tech-challenge/
 ├── phpstan.neon                    # PHPStan nível 8
 ├── .php-cs-fixer.php               # PSR-12
 ├── Makefile
+├── k8s/                            # Manifestos Kubernetes (Deployment, Service, HPA, Job…)
+├── infra/                          # Terraform (cluster kind + deploy + banco)
+├── .github/workflows/ci-cd.yml     # Pipeline CI/CD (test → build → deploy)
+├── docker/docker-entrypoint.sh     # Materializa .env de ConfigMap/Secret no cluster
 ├── swagger.yaml
-├── SECURITY_REPORT.md
-└── IMPLEMENTATION_NOTES.md
+└── SECURITY_REPORT.md
 ```
 
 ---
@@ -196,6 +268,7 @@ oficina-mecanica-tech-challenge/
 
 - Docker 20.10+
 - Docker Compose 2.0+
+- Para implantação em Kubernetes: `kubectl`, `kind` e (opcional) `terraform` 1.5+
 
 ---
 
@@ -209,6 +282,7 @@ cd oficina-mecanica-tech-challenge
 # 2. Configure as variáveis de ambiente
 cp .env.example .env
 # Edite .env — obrigatórios: JWT_SECRET, DB_HOST, DB_DATABASE, DB_USERNAME, DB_PASSWORD, ADMIN_USERNAME, ADMIN_PASSWORD
+# Opcionais: WEBHOOK_TOKEN (webhook de aprovação) e SMTP_HOST/SMTP_PORT/SMTP_USERNAME/SMTP_PASSWORD/MAIL_FROM/MAIL_TO (email de status)
 
 # 3. Suba os containers (build + start)
 make up
@@ -240,6 +314,55 @@ make analyse   # PHPStan nível 8
 make lint      # PHP-CS-Fixer (fix)
 make shell     # acessa o container app
 ```
+
+---
+
+## Implantação (Kubernetes · Terraform · CI/CD)
+
+### Kubernetes (`k8s/`)
+
+Manifestos: Namespace, ConfigMap, Secret, ConfigMap do Nginx, **MySQL
+StatefulSet + PVC**, **Deployment** (initContainer copia a app para um volume
+compartilhado; PHP-FPM + Nginx sidecar), Service, **HPA** (2→6 por CPU 70% /
+memória 80%), **Job de migração** e Ingress.
+
+```bash
+# Cluster local + imagem
+docker build --target production -t oficina-api:local .
+kind create cluster --name oficina
+kind load docker-image oficina-api:local --name oficina
+
+# Deploy + migração do banco
+kubectl apply -k k8s/
+kubectl -n oficina rollout status statefulset/oficina-db --timeout=180s
+kubectl apply -f k8s/migration-job.yaml
+
+# Acesso
+kubectl -n oficina port-forward svc/oficina-api 8080:80
+curl http://localhost:8080/api/health
+```
+
+Detalhes dos recursos e a demo de autoescalonamento (metrics-server) estão em
+[`k8s/README.md`](k8s/README.md).
+
+### Terraform (`infra/`)
+
+```bash
+cd infra
+terraform init
+terraform apply   # cria o cluster kind, builda/carrega a imagem, aplica os manifestos e migra o banco
+```
+
+O que é criado e as variáveis disponíveis: [`infra/README.md`](infra/README.md).
+
+### CI/CD (GitHub Actions)
+
+[`.github/workflows/ci-cd.yml`](.github/workflows/ci-cd.yml) executa, a cada push para `main`:
+
+1. **Test** — `composer install`, PHPUnit, PHPStan (nível 8) e PHP-CS-Fixer.
+2. **Build** — imagem de produção publicada no GHCR.
+3. **Deploy** — cluster kind efêmero, `kubectl apply` dos manifestos, deploy do
+   banco, Job de migração e smoke test de `/api/health`.
 
 ---
 
@@ -291,14 +414,23 @@ A cobertura foca em `src/Domain` e `src/Application` — as camadas com regras d
 | `GET` | `/api/service-items/{id}` | JWT | Buscar serviço |
 | `PUT` | `/api/service-items/{id}` | JWT | Atualizar serviço |
 | `DELETE` | `/api/service-items/{id}` | JWT | Remover serviço |
-| `GET` | `/api/service-orders` | JWT | Listar todas as OS |
+| `GET` | `/api/service-orders` | JWT | Listar OS ativas (ordenadas; exclui FINISHED/DELIVERED) |
 | `POST` | `/api/service-orders` | JWT | Criar OS (status: RECEIVED) |
 | `GET` | `/api/service-orders/{id}` | JWT | Buscar OS por ID |
 | `POST` | `/api/service-orders/{id}/items` | JWT | Adicionar serviços e peças |
-| `PATCH` | `/api/service-orders/{id}/status` | JWT | Avançar estado da OS |
+| `PATCH` | `/api/service-orders/{id}/status` | JWT | Avançar estado da OS (notifica por email) |
+| `POST` | `/api/service-orders/{id}/approval` | Webhook | Aprovar/recusar orçamento (notificação externa) |
 | `GET` | `/api/service-orders/status` | — | Consulta pública por CPF+placa |
 
 > A documentação interativa completa (com exemplos de request/response) está disponível em `/docs/`.
+
+---
+
+## Entregáveis da Fase 2
+
+- **Documentação da API:** Swagger UI em `/docs/` · fonte [`swagger.yaml`](swagger.yaml)
+- **Manifestos Kubernetes:** [`k8s/`](k8s) · **Terraform:** [`infra/`](infra) · **CI/CD:** [`.github/workflows/ci-cd.yml`](.github/workflows/ci-cd.yml)
+- **Vídeo demonstrativo (≤ 15 min):** _adicionar link do YouTube/Vimeo_ — deploy, execução do CI/CD, consumo das APIs e escalabilidade automática
 
 ---
 
