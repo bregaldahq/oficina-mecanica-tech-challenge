@@ -1,0 +1,23 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: oficina-api
+  namespace: oficina
+  labels:
+    app: oficina-api
+# Optional: requires an ingress controller (e.g. ingress-nginx). On kind, enable it
+# with the ingress-nginx addon. Without an Ingress controller, reach the API via:
+#   kubectl -n oficina port-forward svc/oficina-api 8080:80
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: oficina.local
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: oficina-api
+                port:
+                  number: 80
