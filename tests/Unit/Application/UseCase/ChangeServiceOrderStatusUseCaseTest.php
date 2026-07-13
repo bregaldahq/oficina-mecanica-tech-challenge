@@ -9,24 +9,28 @@ use App\Application\UseCase\ServiceOrder\ChangeServiceOrderStatusUseCase;
 use App\Domain\Aggregate\ServiceOrder;
 use App\Domain\Entity\Customer;
 use App\Domain\Entity\Vehicle;
+use App\Domain\Event\ServiceOrderStatusChangedEvent;
 use App\Domain\Exception\DomainException;
 use App\Domain\Exception\InvalidStatusTransitionException;
 use App\Domain\Exception\NotFoundException;
 use App\Domain\Repository\ServiceOrderRepositoryInterface;
 use App\Domain\ValueObject\Document;
 use App\Domain\ValueObject\LicensePlate;
+use App\Infrastructure\Event\InMemoryEventDispatcher;
 use PHPUnit\Framework\MockObject\MockObject;
 use PHPUnit\Framework\TestCase;
 
 class ChangeServiceOrderStatusUseCaseTest extends TestCase
 {
     private MockObject&ServiceOrderRepositoryInterface $orderRepo;
+    private InMemoryEventDispatcher $dispatcher;
     private ChangeServiceOrderStatusUseCase $useCase;
 
     protected function setUp(): void
     {
-        $this->orderRepo = $this->createMock(ServiceOrderRepositoryInterface::class);
-        $this->useCase   = new ChangeServiceOrderStatusUseCase($this->orderRepo);
+        $this->orderRepo  = $this->createMock(ServiceOrderRepositoryInterface::class);
+        $this->dispatcher = new InMemoryEventDispatcher();
+        $this->useCase    = new ChangeServiceOrderStatusUseCase($this->orderRepo, $this->dispatcher);
     }
 
     private function makeOrder(): ServiceOrder
@@ -53,6 +57,26 @@ class ChangeServiceOrderStatusUseCaseTest extends TestCase
         $this->orderRepo->method('findById')->willReturn(null);
 
         $this->useCase->execute(new ChangeStatusDTO('not-found', 'DIAGNOSIS'));
+    }
+
+    public function testDispatchesStatusChangedEvent(): void
+    {
+        $order = $this->makeOrder();
+        $this->orderRepo->method('findById')->willReturn($order);
+        $this->orderRepo->method('updateStatus');
+
+        /** @var string[] $newStatuses */
+        $newStatuses = [];
+        $this->dispatcher->subscribe(
+            ServiceOrderStatusChangedEvent::class,
+            function (ServiceOrderStatusChangedEvent $e) use (&$newStatuses): void {
+                $newStatuses[] = $e->newStatus;
+            }
+        );
+
+        $this->useCase->execute(new ChangeStatusDTO('order-1', 'DIAGNOSIS'));
+
+        $this->assertSame(['DIAGNOSIS'], $newStatuses);
     }
 
     public function testThrowsOnInvalidStatusString(): void

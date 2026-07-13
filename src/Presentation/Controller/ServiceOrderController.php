@@ -7,16 +7,18 @@ namespace App\Presentation\Controller;
 use App\Application\DTO\ServiceOrder\AddItemsInputDTO;
 use App\Application\DTO\ServiceOrder\ChangeStatusDTO;
 use App\Application\DTO\ServiceOrder\CreateServiceOrderInputDTO;
+use App\Application\DTO\ServiceOrder\ReviewBudgetDTO;
 use App\Application\UseCase\ServiceOrder\AddItemsToServiceOrderUseCase;
 use App\Application\UseCase\ServiceOrder\ChangeServiceOrderStatusUseCase;
 use App\Application\UseCase\ServiceOrder\CreateServiceOrderUseCase;
 use App\Application\UseCase\ServiceOrder\GetServiceOrderByClientUseCase;
 use App\Application\UseCase\ServiceOrder\GetServiceOrderUseCase;
+use App\Application\UseCase\ServiceOrder\ListServiceOrdersUseCase;
+use App\Application\UseCase\ServiceOrder\ReviewBudgetUseCase;
 use App\Domain\Exception\DomainException;
 use App\Domain\Exception\InsufficientStockException;
 use App\Domain\Exception\InvalidStatusTransitionException;
 use App\Domain\Exception\NotFoundException;
-use App\Domain\Repository\ServiceOrderRepositoryInterface;
 
 class ServiceOrderController
 {
@@ -26,15 +28,15 @@ class ServiceOrderController
         private readonly GetServiceOrderUseCase $getUseCase,
         private readonly ChangeServiceOrderStatusUseCase $changeStatusUseCase,
         private readonly GetServiceOrderByClientUseCase $getByClientUseCase,
-        private readonly ServiceOrderRepositoryInterface $orderRepository,
+        private readonly ListServiceOrdersUseCase $listUseCase,
+        private readonly ReviewBudgetUseCase $reviewBudgetUseCase,
     ) {
     }
 
     public function index(): void
     {
-        $orders = array_map(fn ($o) => $o->toArray(), $this->orderRepository->findAll());
         http_response_code(200);
-        echo json_encode($orders);
+        echo json_encode($this->listUseCase->execute());
     }
 
     /** @param array<string, string> $params */
@@ -134,6 +136,45 @@ class ServiceOrderController
         }
     }
 
+    /**
+     * Receives an external budget decision (approval/rejection) for the customer's order.
+     * Intended to be called by an outside approval channel; guarded by a shared webhook token.
+     *
+     * @param array<string, string> $params
+     */
+    public function reviewBudget(array $params): void
+    {
+        if (!$this->webhookAuthorized()) {
+            http_response_code(401);
+            echo json_encode(['error' => 'Token de webhook inválido.']);
+            return;
+        }
+
+        $body = $this->parseBody();
+
+        if (!array_key_exists('approved', $body) || !is_bool($body['approved'])) {
+            http_response_code(400);
+            echo json_encode(['error' => 'O campo "approved" (boolean) é obrigatório.']);
+            return;
+        }
+
+        try {
+            $order = $this->reviewBudgetUseCase->execute(new ReviewBudgetDTO(
+                orderId: $params['id'],
+                approved: $body['approved'],
+            ));
+
+            http_response_code(200);
+            echo json_encode($order->toArray());
+        } catch (NotFoundException $e) {
+            http_response_code(404);
+            echo json_encode(['error' => $e->getMessage()]);
+        } catch (InvalidStatusTransitionException $e) {
+            http_response_code(422);
+            echo json_encode(['error' => $e->getMessage()]);
+        }
+    }
+
     public function statusByClient(): void
     {
         $document     = $_GET['document']      ?? '';
@@ -161,5 +202,22 @@ class ServiceOrderController
     {
         $raw = file_get_contents('php://input');
         return json_decode($raw ?: '{}', true) ?? [];
+    }
+
+    /**
+     * Validates the shared webhook token when one is configured (via the WEBHOOK_TOKEN secret).
+     * When it is not configured (local development), the endpoint stays open.
+     */
+    private function webhookAuthorized(): bool
+    {
+        $expected = $_ENV['WEBHOOK_TOKEN'] ?? '';
+
+        if (!is_string($expected) || $expected === '') {
+            return true;
+        }
+
+        $provided = $_SERVER['HTTP_X_WEBHOOK_TOKEN'] ?? '';
+
+        return is_string($provided) && hash_equals($expected, $provided);
     }
 }

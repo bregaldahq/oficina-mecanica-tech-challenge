@@ -1,0 +1,21 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: oficina-config
+  namespace: oficina
+  labels:
+    app.kubernetes.io/part-of: oficina-mecanica
+# Non-sensitive application configuration injected into the API and database pods.
+# Sensitive values (passwords, JWT/webhook secrets) live in the Secret, never here.
+data:
+  APP_ENV: "production"
+  APP_DEBUG: "false"
+  DB_HOST: "oficina-db"
+  DB_PORT: "3306"
+  DB_DATABASE: "oficina_mecanica"
+  JWT_EXPIRATION: "3600"
+  # Email notifications (SMTP). Leave SMTP_HOST/MAIL_TO empty to disable.
+  SMTP_HOST: ""
+  SMTP_PORT: "587"
+  MAIL_FROM: "no-reply@oficina.local"
+  MAIL_TO: ""

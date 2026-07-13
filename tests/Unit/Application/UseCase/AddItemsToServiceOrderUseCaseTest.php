@@ -70,6 +70,25 @@ class AddItemsToServiceOrderUseCaseTest extends TestCase
         $this->assertCount(1, $result->getPartsWithQuantity());
     }
 
+    public function testKeepsBudgetCurrentWhenItemsAreAdded(): void
+    {
+        $order   = $this->makeOrder();
+        $service = ServiceItem::create('svc-1', 'Troca de óleo', 150.00, 60);
+        $part    = Part::create('p-1', 'Filtro', 45.00, 10);
+
+        $this->orderRepo->method('findById')->willReturn($order);
+        $this->serviceItemRepo->method('findById')->with('svc-1')->willReturn($service);
+        $this->partRepo->method('findById')->with('p-1')->willReturn($part);
+
+        $result = $this->useCase->execute(new AddItemsInputDTO(
+            orderId: 'order-1',
+            serviceItemIds: ['svc-1'],
+            parts: [['part_id' => 'p-1', 'quantity' => 2]],
+        ));
+
+        $this->assertSame(240.00, $result->getTotalAmount());
+    }
+
     public function testThrowsWhenOrderNotFound(): void
     {
         $this->expectException(NotFoundException::class);
