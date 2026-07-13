@@ -5,8 +5,9 @@ declare(strict_types=1);
 namespace App\Infrastructure\Event;
 
 use App\Domain\Event\DomainEventInterface;
+use App\Domain\Event\EventDispatcherInterface;
 
-class InMemoryEventDispatcher
+class InMemoryEventDispatcher implements EventDispatcherInterface
 {
     /** @var array<string, callable[]> */
     private array $listeners = [];

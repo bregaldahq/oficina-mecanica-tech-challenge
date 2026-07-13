@@ -19,6 +19,7 @@ class ServiceOrder
     private const STATUS_DIAGNOSIS         = 'DIAGNOSIS';
     private const STATUS_AWAITING_APPROVAL = 'AWAITING_APPROVAL';
     private const STATUS_EXECUTING         = 'EXECUTING';
+    private const STATUS_REJECTED          = 'REJECTED';
     private const STATUS_FINISHED          = 'FINISHED';
     private const STATUS_DELIVERED         = 'DELIVERED';
 
@@ -133,7 +134,8 @@ class ServiceOrder
 
     public function addService(ServiceItem $service): void
     {
-        $this->services[] = $service;
+        $this->services[]  = $service;
+        $this->totalAmount = $this->calculateTotalAmount();
     }
 
     /**
@@ -144,6 +146,7 @@ class ServiceOrder
     {
         $part->decreaseStock($quantity);
         $this->partsWithQuantity[] = ['part' => $part, 'quantity' => $quantity];
+        $this->totalAmount         = $this->calculateTotalAmount();
     }
 
     public function calculateTotalAmount(): float
@@ -177,6 +180,13 @@ class ServiceOrder
         $this->requireStatus(self::STATUS_AWAITING_APPROVAL, self::STATUS_EXECUTING);
         $this->status = self::STATUS_EXECUTING;
         $this->recordEvent(new ServiceOrderStatusChangedEvent($this->id, self::STATUS_AWAITING_APPROVAL, self::STATUS_EXECUTING));
+    }
+
+    public function reject(): void
+    {
+        $this->requireStatus(self::STATUS_AWAITING_APPROVAL, self::STATUS_REJECTED);
+        $this->status = self::STATUS_REJECTED;
+        $this->recordEvent(new ServiceOrderStatusChangedEvent($this->id, self::STATUS_AWAITING_APPROVAL, self::STATUS_REJECTED));
     }
 
     public function finish(): void

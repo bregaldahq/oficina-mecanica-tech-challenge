@@ -49,11 +49,20 @@ WORKDIR /var/www/html
 COPY --from=vendor /app/vendor ./vendor
 COPY src ./src
 COPY public ./public
+COPY bin ./bin
 COPY docs ./docs
 COPY swagger.yaml ./swagger.yaml
+COPY docker/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 
-RUN chown -R www-data:www-data /var/www/html
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh \
+    && mkdir -p /var/log/php \
+    && chown -R www-data:www-data /var/www/html /var/log/php
 
 EXPOSE 9000
+
+# Drop privileges: run as the non-root www-data user (uid/gid 82 on Alpine).
+USER www-data
+
+ENTRYPOINT ["docker-entrypoint.sh"]
 
 CMD ["php-fpm"]

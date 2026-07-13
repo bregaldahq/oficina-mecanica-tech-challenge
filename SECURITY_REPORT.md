@@ -123,6 +123,19 @@ typed domain exceptions on invalid input — these are caught and returned as HT
 
 ---
 
+## 11. Container Security
+
+- The **production image runs as the non-root `www-data` user** (uid/gid 82),
+  limiting the blast radius of a container compromise. PHP-FPM listens on the
+  unprivileged port 9000.
+- Multi-stage build: Composer and build tooling are absent from the final
+  production layer.
+- In Kubernetes, the pod sets `securityContext.fsGroup: 82` so the shared volume
+  stays writable by the non-root user, and sensitive values are injected from a
+  `Secret` — never baked into the image.
+
+---
+
 ## Summary
 
 | Threat | Status |
@@ -137,5 +150,6 @@ typed domain exceptions on invalid input — these are caught and returned as HT
 | Missing env vars | ✅ Validated at startup |
 | Clickjacking | ✅ X-Frame-Options: DENY |
 | MIME sniffing | ✅ X-Content-Type-Options: nosniff |
+| Container runs as root | ✅ Mitigated (non-root `www-data` user) |
 | DB port exposure | ⚠️ Remove ports in production |
 | Token revocation | ⚠️ Not implemented (stateless by design) |

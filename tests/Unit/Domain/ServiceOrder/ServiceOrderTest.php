@@ -57,6 +57,23 @@ class ServiceOrderTest extends TestCase
         $order->approve(); // requires AWAITING_APPROVAL
     }
 
+    public function testRejectFromAwaitingApprovalSetsRejectedStatus(): void
+    {
+        $order = ServiceOrder::create('order-001', $this->customer, $this->vehicle);
+        $order->changeToDiagnosis();
+        $order->sendForApproval();
+        $order->reject();
+
+        $this->assertSame('REJECTED', $order->getStatus());
+    }
+
+    public function testRejectRequiresAwaitingApproval(): void
+    {
+        $this->expectException(InvalidStatusTransitionException::class);
+        $order = ServiceOrder::create('order-001', $this->customer, $this->vehicle);
+        $order->reject(); // from RECEIVED
+    }
+
     public function testSendForApprovalCalculatesAndStoresTotal(): void
     {
         $order = ServiceOrder::create('order-001', $this->customer, $this->vehicle);
@@ -76,6 +93,18 @@ class ServiceOrderTest extends TestCase
         $order->addPart(Part::create('p-1', 'Filtro', 45.00, 10), 2);
 
         $this->assertSame(240.00, $order->calculateTotalAmount());
+    }
+
+    public function testTotalAmountStaysCurrentAsItemsAreAdded(): void
+    {
+        $order = ServiceOrder::create('order-001', $this->customer, $this->vehicle);
+        $this->assertSame(0.00, $order->getTotalAmount());
+
+        $order->addService(ServiceItem::create('svc-1', 'Troca de óleo', 150.00, 60));
+        $this->assertSame(150.00, $order->getTotalAmount());
+
+        $order->addPart(Part::create('p-1', 'Filtro', 45.00, 10), 2);
+        $this->assertSame(240.00, $order->getTotalAmount()); // 150 + 2 * 45
     }
 
     public function testToArrayContainsExpectedKeys(): void

@@ -63,6 +63,30 @@ class PdoServiceOrderRepository implements ServiceOrderRepositoryInterface
         return array_map(fn (array $row) => $this->hydrateWithItems($row), $stmt->fetchAll());
     }
 
+    public function findActiveOrdered(): array
+    {
+        $stmt = $this->pdo->query(
+            "SELECT so.*,
+                    c.name AS c_name, c.document AS c_document,
+                    v.customer_id AS v_customer_id, v.license_plate AS v_plate,
+                    v.brand AS v_brand, v.model AS v_model, v.year AS v_year
+             FROM service_orders so
+             JOIN customers c ON c.id = so.customer_id
+             JOIN vehicles  v ON v.id = so.vehicle_id
+             WHERE so.status NOT IN ('FINISHED', 'DELIVERED')
+             ORDER BY CASE so.status
+                          WHEN 'EXECUTING'         THEN 1
+                          WHEN 'AWAITING_APPROVAL' THEN 2
+                          WHEN 'DIAGNOSIS'         THEN 3
+                          WHEN 'RECEIVED'          THEN 4
+                          ELSE 5
+                      END ASC,
+                      so.created_at ASC"
+        );
+        assert($stmt !== false);
+        return array_map(fn (array $row) => $this->hydrateWithItems($row), $stmt->fetchAll());
+    }
+
     public function findByDocumentAndLicensePlate(string $document, string $licensePlate, ?string $status = null): array
     {
         $sql = 'SELECT so.*,

@@ -13,6 +13,15 @@ interface ServiceOrderRepositoryInterface
     /** @return ServiceOrder[] */
     public function findAll(): array;
 
+    /**
+     * Lists open orders for the workshop board: closed orders (FINISHED, DELIVERED)
+     * are excluded, the rest are ranked by workflow priority
+     * (EXECUTING > AWAITING_APPROVAL > DIAGNOSIS > RECEIVED), oldest first within a status.
+     *
+     * @return ServiceOrder[]
+     */
+    public function findActiveOrdered(): array;
+
     /** @return ServiceOrder[] */
     public function findByDocumentAndLicensePlate(string $document, string $licensePlate, ?string $status = null): array;
 
