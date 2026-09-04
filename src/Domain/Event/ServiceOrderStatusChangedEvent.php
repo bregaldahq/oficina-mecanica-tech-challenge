@@ -12,6 +12,8 @@ final class ServiceOrderStatusChangedEvent implements DomainEventInterface
         public readonly string $orderId,
         public readonly string $previousStatus,
         public readonly string $newStatus,
+        /** Order total at the moment of the transition — feeds the revenue widgets. */
+        public readonly float $totalAmount = 0.00,
     ) {
         $this->occurredAt = new \DateTimeImmutable();
     }

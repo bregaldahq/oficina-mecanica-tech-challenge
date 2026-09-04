@@ -1,0 +1,47 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: oficina-nginx
+  labels:
+    app.kubernetes.io/part-of: oficina-mecanica
+# Configuração do Nginx dentro do cluster: o upstream PHP-FPM é um sidecar no
+# mesmo Pod, alcançado por localhost. A porta é 8080 porque a imagem
+# nginx-unprivileged roda como não-root.
+data:
+  default.conf: |
+    server {
+        listen 8080;
+        server_name _;
+        root /var/www/html/public;
+        index index.php;
+
+        # Log de acesso desligado: o log estruturado JSON por request é emitido
+        # pela própria aplicação (seção 7 dos Contratos).
+        access_log off;
+
+        location /docs {
+            alias /var/www/html/docs;
+            index index.html;
+            try_files $uri $uri/ =404;
+        }
+
+        location = /swagger.yaml {
+            alias /var/www/html/swagger.yaml;
+            add_header Content-Type "application/yaml";
+        }
+
+        location /api {
+            try_files $uri $uri/ /index.php?$query_string;
+        }
+
+        location ~ \.php$ {
+            fastcgi_pass   127.0.0.1:9000;
+            fastcgi_index  index.php;
+            fastcgi_param  SCRIPT_FILENAME $document_root$fastcgi_script_name;
+            include        fastcgi_params;
+        }
+
+        location / {
+            try_files $uri $uri/ /index.php?$query_string;
+        }
+    }

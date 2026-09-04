@@ -55,6 +55,9 @@ class PdoServiceOrderRepositoryTest extends TestCase
                 id TEXT PRIMARY KEY,
                 name TEXT NOT NULL,
                 document TEXT NOT NULL UNIQUE,
+                status TEXT NOT NULL DEFAULT \'ACTIVE\',
+                email TEXT NULL,
+                phone TEXT NULL,
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP
             )
         ');

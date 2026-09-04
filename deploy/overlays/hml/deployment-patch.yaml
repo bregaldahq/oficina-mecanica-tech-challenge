@@ -1,0 +1,18 @@
+# Homologação: 2 réplicas, recursos enxutos, APP_DEBUG ligado via ConfigMap.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: oficina-api
+spec:
+  replicas: 2
+  template:
+    spec:
+      containers:
+        - name: php-fpm
+          resources:
+            requests: { cpu: "100m", memory: "128Mi" }
+            limits:   { cpu: "500m", memory: "256Mi" }
+        - name: nginx
+          resources:
+            requests: { cpu: "50m", memory: "32Mi" }
+            limits:   { cpu: "200m", memory: "128Mi" }

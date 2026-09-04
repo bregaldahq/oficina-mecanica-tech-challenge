@@ -1,0 +1,8 @@
+# O Namespace é criado por overlay (oficina-hml / oficina-prod). O nome abaixo é
+# apenas o valor de base; cada overlay o substitui via patch + `namespace:`.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: oficina
+  labels:
+    app.kubernetes.io/part-of: oficina-mecanica
