@@ -5,56 +5,38 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/../vendor/autoload.php';
 
-// Load environment variables
-$envFile = __DIR__ . '/../.env';
-if (file_exists($envFile)) {
-    foreach (file($envFile, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) as $line) {
-        if (str_starts_with(trim($line), '#') || !str_contains($line, '=')) {
-            continue;
-        }
-        [$key, $value] = explode('=', $line, 2);
-        $_ENV[trim($key)] = trim($value);
-    }
-}
+use App\Infrastructure\Config\EnvLoader;
+use App\Infrastructure\Database\MigrationRunner;
 
-echo "Iniciando migração do banco de dados...\n";
+EnvLoader::loadFile(__DIR__ . '/../.env');
+
+$host     = $_ENV['DB_HOST']         ?? 'db';
+$port     = $_ENV['DB_PORT']         ?? '3306';
+$dbname   = $_ENV['DB_DATABASE']     ?? 'oficina_mecanica';
+$user     = $_ENV['DB_USERNAME']     ?? 'oficina_user';
+$pass     = $_ENV['DB_PASSWORD']     ?? 'secret123';
+$appEnv   = $_ENV['APP_ENV']         ?? 'local';
+$pathEnv  = $_ENV['MIGRATIONS_PATH'] ?? __DIR__ . '/../migrations';
+
+echo "Aplicando migrations de {$pathEnv} (APP_ENV={$appEnv})...\n";
 
 try {
-    $host   = $_ENV['DB_HOST']     ?? 'db';
-    $port   = $_ENV['DB_PORT']     ?? '3306';
-    $user   = $_ENV['DB_USERNAME'] ?? 'oficina_user';
-    $pass   = $_ENV['DB_PASSWORD'] ?? 'secret123';
-
-    // Connect without dbname to allow CREATE DATABASE
+    // The database itself is created by the infrastructure repository, never by the runner.
     $pdo = new PDO(
-        "mysql:host={$host};port={$port};charset=utf8mb4",
-        $user,
-        $pass,
-        [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]
+        "mysql:host={$host};port={$port};dbname={$dbname};charset=utf8mb4",
+        (string)$user,
+        (string)$pass,
+        [
+            PDO::ATTR_ERRMODE            => PDO::ERRMODE_EXCEPTION,
+            PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+        ]
     );
 
-    $schemaFile = __DIR__ . '/../src/Infrastructure/Database/schema.sql';
+    $runner  = new MigrationRunner($pdo, skipDemo: $appEnv === 'production');
+    $applied = $runner->run((string)$pathEnv);
 
-    if (!file_exists($schemaFile)) {
-        echo "ERRO: Arquivo schema.sql não encontrado em {$schemaFile}\n";
-        exit(1);
-    }
-
-    $sql = file_get_contents($schemaFile);
-
-    // Split by semicolon and execute each statement
-    $statements = array_filter(
-        array_map('trim', explode(';', $sql)),
-        fn($s) => !empty($s)
-    );
-
-    foreach ($statements as $statement) {
-        $pdo->exec($statement);
-        echo ".";
-    }
-
-    echo "\nMigração concluída com sucesso!\n";
+    echo 'Migração concluída. Aplicadas nesta execução: ' . count($applied) . "\n";
 } catch (\Throwable $e) {
-    echo "\nERRO: " . $e->getMessage() . "\n";
+    echo 'ERRO: ' . $e->getMessage() . "\n";
     exit(1);
 }

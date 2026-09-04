@@ -22,6 +22,13 @@ interface ServiceOrderRepositoryInterface
      */
     public function findActiveOrdered(): array;
 
+    /**
+     * Orders owned by a customer, newest first. Used by GET /api/service-orders/me.
+     *
+     * @return ServiceOrder[]
+     */
+    public function findByCustomerId(string $customerId): array;
+
     /** @return ServiceOrder[] */
     public function findByDocumentAndLicensePlate(string $document, string $licensePlate, ?string $status = null): array;
 

@@ -6,9 +6,21 @@ namespace App\Presentation\Router;
 
 use App\Presentation\Middleware\AuthMiddleware;
 
+/**
+ * Minimal routing table with authentication and role authorization.
+ *
+ * The authorization matrix lives in docs/fase-3/CONTRATOS.md §5 and is applied in
+ * public/index.php via ->requireRole(...). The JWT is revalidated locally on every
+ * protected route (defence in depth) — headers injected by the API Gateway are never trusted.
+ */
 class Router
 {
-    /** @var array<array{method: string, pattern: string, handler: callable, requireAuth: bool}> */
+    /**
+     * @var array<array{
+     *     method: string, pattern: string, handler: callable,
+     *     requireAuth: bool, roles: array<int, string>|null
+     * }>
+     */
     private array $routes = [];
 
     private ?AuthMiddleware $authMiddleware = null;
@@ -18,39 +30,60 @@ class Router
         $this->authMiddleware = $middleware;
     }
 
-    public function get(string $pattern, callable $handler, bool $requireAuth = true): void
+    public function get(string $pattern, callable $handler, bool $requireAuth = true): self
     {
-        $this->addRoute('GET', $pattern, $handler, $requireAuth);
+        return $this->addRoute('GET', $pattern, $handler, $requireAuth);
     }
 
-    public function post(string $pattern, callable $handler, bool $requireAuth = true): void
+    public function post(string $pattern, callable $handler, bool $requireAuth = true): self
     {
-        $this->addRoute('POST', $pattern, $handler, $requireAuth);
+        return $this->addRoute('POST', $pattern, $handler, $requireAuth);
     }
 
-    public function put(string $pattern, callable $handler, bool $requireAuth = true): void
+    public function put(string $pattern, callable $handler, bool $requireAuth = true): self
     {
-        $this->addRoute('PUT', $pattern, $handler, $requireAuth);
+        return $this->addRoute('PUT', $pattern, $handler, $requireAuth);
     }
 
-    public function delete(string $pattern, callable $handler, bool $requireAuth = true): void
+    public function delete(string $pattern, callable $handler, bool $requireAuth = true): self
     {
-        $this->addRoute('DELETE', $pattern, $handler, $requireAuth);
+        return $this->addRoute('DELETE', $pattern, $handler, $requireAuth);
     }
 
-    public function patch(string $pattern, callable $handler, bool $requireAuth = true): void
+    public function patch(string $pattern, callable $handler, bool $requireAuth = true): self
     {
-        $this->addRoute('PATCH', $pattern, $handler, $requireAuth);
+        return $this->addRoute('PATCH', $pattern, $handler, $requireAuth);
     }
 
-    private function addRoute(string $method, string $pattern, callable $handler, bool $requireAuth): void
+    /**
+     * Restricts the last registered route to the given roles (claim `role` of the JWT).
+     * Implies authentication.
+     */
+    public function requireRole(string ...$roles): self
+    {
+        $index = array_key_last($this->routes);
+
+        if ($index === null) {
+            throw new \LogicException('requireRole() must be called right after a route definition.');
+        }
+
+        $this->routes[$index]['roles']       = array_values($roles);
+        $this->routes[$index]['requireAuth'] = true;
+
+        return $this;
+    }
+
+    private function addRoute(string $method, string $pattern, callable $handler, bool $requireAuth): self
     {
         $this->routes[] = [
             'method'      => $method,
             'pattern'     => $pattern,
             'handler'     => $handler,
             'requireAuth' => $requireAuth,
+            'roles'       => null,
         ];
+
+        return $this;
     }
 
     public function dispatch(string $method, string $uri): void
@@ -65,18 +98,41 @@ class Router
 
             $params = $this->matchPattern($route['pattern'], $path);
 
-            if ($params !== null) {
-                if ($route['requireAuth'] && $this->authMiddleware !== null) {
-                    $this->authMiddleware->handle();
-                }
-
-                ($route['handler'])($params);
-                return;
+            if ($params === null) {
+                continue;
             }
+
+            /** @var array<string, mixed> $claims */
+            $claims = [];
+
+            if ($route['requireAuth'] && $this->authMiddleware !== null) {
+                $claims = $this->authMiddleware->handle();
+
+                if ($route['roles'] !== null && !$this->hasRole($claims, $route['roles'])) {
+                    http_response_code(403);
+                    echo json_encode(['error' => 'Acesso negado.']);
+                    return;
+                }
+            }
+
+            // Claims are handed to the handler so controllers can scope data to the token subject.
+            ($route['handler'])($params, $claims);
+            return;
         }
 
         http_response_code(404);
         echo json_encode(['error' => 'Rota não encontrada.']);
+    }
+
+    /**
+     * @param array<string, mixed>  $claims
+     * @param array<int, string>    $roles
+     */
+    private function hasRole(array $claims, array $roles): bool
+    {
+        $role = $claims['role'] ?? null;
+
+        return is_string($role) && in_array($role, $roles, true);
     }
 
     /** @return array<string, string>|null */

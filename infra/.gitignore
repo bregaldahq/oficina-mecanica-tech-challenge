@@ -1,8 +1,0 @@
-# Terraform local state and downloaded provider plugins — never commit.
-.terraform/
-*.tfstate
-*.tfstate.*
-crash.log
-
-# kubeconfig written by the kind provider (contains cluster credentials).
-oficina-config

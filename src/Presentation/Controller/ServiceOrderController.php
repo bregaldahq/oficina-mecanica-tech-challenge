@@ -11,8 +11,8 @@ use App\Application\DTO\ServiceOrder\ReviewBudgetDTO;
 use App\Application\UseCase\ServiceOrder\AddItemsToServiceOrderUseCase;
 use App\Application\UseCase\ServiceOrder\ChangeServiceOrderStatusUseCase;
 use App\Application\UseCase\ServiceOrder\CreateServiceOrderUseCase;
-use App\Application\UseCase\ServiceOrder\GetServiceOrderByClientUseCase;
 use App\Application\UseCase\ServiceOrder\GetServiceOrderUseCase;
+use App\Application\UseCase\ServiceOrder\ListServiceOrdersByCustomerUseCase;
 use App\Application\UseCase\ServiceOrder\ListServiceOrdersUseCase;
 use App\Application\UseCase\ServiceOrder\ReviewBudgetUseCase;
 use App\Domain\Exception\DomainException;
@@ -27,7 +27,7 @@ class ServiceOrderController
         private readonly AddItemsToServiceOrderUseCase $addItemsUseCase,
         private readonly GetServiceOrderUseCase $getUseCase,
         private readonly ChangeServiceOrderStatusUseCase $changeStatusUseCase,
-        private readonly GetServiceOrderByClientUseCase $getByClientUseCase,
+        private readonly ListServiceOrdersByCustomerUseCase $listByCustomerUseCase,
         private readonly ListServiceOrdersUseCase $listUseCase,
         private readonly ReviewBudgetUseCase $reviewBudgetUseCase,
     ) {
@@ -39,17 +39,52 @@ class ServiceOrderController
         echo json_encode($this->listUseCase->execute());
     }
 
-    /** @param array<string, string> $params */
-    public function show(array $params): void
+    /**
+     * @param array<string, string> $params
+     * @param array<string, mixed>  $claims
+     */
+    public function show(array $params, array $claims = []): void
     {
         try {
             $order = $this->getUseCase->execute($params['id']);
+
+            // A customer may only read their own order. We answer 404 (not 403) on purpose:
+            // a 403 would confirm that an order with this id exists.
+            if (($claims['role'] ?? null) === 'customer'
+                && $order->getCustomer()->getId() !== ($claims['sub'] ?? null)
+            ) {
+                http_response_code(404);
+                echo json_encode(['error' => "Ordem de serviço não encontrada: {$params['id']}"]);
+                return;
+            }
+
             http_response_code(200);
             echo json_encode($order->toArray());
         } catch (NotFoundException $e) {
             http_response_code(404);
             echo json_encode(['error' => $e->getMessage()]);
         }
+    }
+
+    /**
+     * GET /api/service-orders/me — orders of the authenticated subject.
+     * The customer id always comes from the `sub` claim, never from user input.
+     *
+     * @param array<string, string> $params
+     * @param array<string, mixed>  $claims
+     */
+    public function mine(array $params = [], array $claims = []): void
+    {
+        $customerId = $claims['sub'] ?? null;
+
+        if (!is_string($customerId) || $customerId === '') {
+            http_response_code(401);
+            echo json_encode(['error' => 'Token sem identificação de cliente.']);
+            return;
+        }
+
+        http_response_code(200);
+        echo json_encode($this->listByCustomerUseCase->execute($customerId));
     }
 
     public function store(): void
@@ -175,28 +210,6 @@ class ServiceOrderController
         }
     }
 
-    public function statusByClient(): void
-    {
-        $document     = $_GET['document']      ?? '';
-        $licensePlate = $_GET['license_plate'] ?? '';
-        $status       = $_GET['status']        ?? null;
-
-        if (empty($document) || empty($licensePlate)) {
-            http_response_code(400);
-            echo json_encode(['error' => 'document e license_plate são obrigatórios.']);
-            return;
-        }
-
-        try {
-            $orders = $this->getByClientUseCase->execute($document, $licensePlate, $status ?: null);
-            http_response_code(200);
-            echo json_encode($orders);
-        } catch (DomainException $e) {
-            http_response_code(400);
-            echo json_encode(['error' => $e->getMessage()]);
-        }
-    }
-
     /** @return array<string, mixed> */
     private function parseBody(): array
     {
@@ -205,15 +218,16 @@ class ServiceOrderController
     }
 
     /**
-     * Validates the shared webhook token when one is configured (via the WEBHOOK_TOKEN secret).
-     * When it is not configured (local development), the endpoint stays open.
+     * Validates the shared webhook token (WEBHOOK_TOKEN secret).
+     * The token is MANDATORY: with no token configured the endpoint is closed, never open —
+     * an unset secret used to leave the budget approval callable by anyone.
      */
     private function webhookAuthorized(): bool
     {
         $expected = $_ENV['WEBHOOK_TOKEN'] ?? '';
 
         if (!is_string($expected) || $expected === '') {
-            return true;
+            return false;
         }
 
         $provided = $_SERVER['HTTP_X_WEBHOOK_TOKEN'] ?? '';

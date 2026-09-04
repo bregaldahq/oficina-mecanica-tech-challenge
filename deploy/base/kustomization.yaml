@@ -1,0 +1,32 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# Base comum aos ambientes. O namespace, as réplicas, os recursos, a tag da
+# imagem e os nomes dos segredos no Secrets Manager são definidos nos overlays
+# `deploy/overlays/hml` e `deploy/overlays/prod`.
+#
+# O migration-job.yaml NÃO entra aqui de propósito: a spec de um Job é imutável,
+# e um `kubectl apply -k` de rotina falharia. O pipeline o aplica à parte
+# (delete + apply), ver .github/workflows/deploy.yml.
+resources:
+  - namespace.yaml
+  - configmap.yaml
+  - migrations-configmap.yaml
+  - nginx-configmap.yaml
+  - external-secret.yaml
+  - api-deployment.yaml
+  - hpa.yaml
+  - targetgroupbinding.yaml
+
+labels:
+  - includeSelectors: false
+    pairs:
+      app.kubernetes.io/name: oficina-api
+      app.kubernetes.io/part-of: oficina-mecanica
+
+# O pipeline sobrescreve com o repositório ECR e a tag = git sha:
+#   kustomize edit set image oficina-api=<ecr_url>:<sha>
+images:
+  - name: oficina-api
+    newName: oficina-api
+    newTag: local

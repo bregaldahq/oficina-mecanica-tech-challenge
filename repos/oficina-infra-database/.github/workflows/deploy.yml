@@ -1,0 +1,164 @@
+name: Deploy
+
+on:
+  push:
+    branches: [develop, main]
+    paths-ignore:
+      - "**/*.md"
+      - "docs/**"
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Ambiente alvo
+        required: true
+        type: choice
+        options: [hml, prod]
+
+permissions:
+  id-token: write # OIDC — nenhuma access key estatica
+  contents: read
+
+env:
+  AWS_REGION: us-east-1
+  TF_VERSION: "1.9.8"
+
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  resolve:
+    name: Resolver ambiente
+    runs-on: ubuntu-latest
+    outputs:
+      tf_env: ${{ steps.pick.outputs.tf_env }}
+      gh_env: ${{ steps.pick.outputs.gh_env }}
+    steps:
+      - id: pick
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TF_ENV="${{ inputs.environment }}"
+          elif [ "${{ github.ref }}" = "refs/heads/main" ]; then
+            TF_ENV="prod"
+          else
+            TF_ENV="hml"
+          fi
+          if [ "$TF_ENV" = "prod" ]; then GH_ENV="producao"; else GH_ENV="homologacao"; fi
+          echo "tf_env=$TF_ENV" >> "$GITHUB_OUTPUT"
+          echo "gh_env=$GH_ENV" >> "$GITHUB_OUTPUT"
+
+  apply:
+    name: terraform apply (${{ needs.resolve.outputs.tf_env }})
+    needs: resolve
+    runs-on: ubuntu-latest
+    environment: ${{ needs.resolve.outputs.gh_env }}
+
+    env:
+      TF_ENV: ${{ needs.resolve.outputs.tf_env }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: terraform init
+        run: |
+          terraform init \
+            -backend-config="bucket=${{ secrets.TF_STATE_BUCKET }}" \
+            -backend-config="key=oficina/oficina-infra-database/${TF_ENV}/terraform.tfstate" \
+            -backend-config="region=${{ env.AWS_REGION }}" \
+            -backend-config="dynamodb_table=oficina-tflock" \
+            -backend-config="encrypt=true"
+
+      - name: terraform apply
+        run: terraform apply -auto-approve -var-file="envs/${TF_ENV}.tfvars"
+
+      # Smoke test da camada de fundacao: os parametros SSM que os outros tres
+      # repositorios consomem precisam existir e nao estar vazios. Se algum
+      # faltar, o repo de k8s quebraria so la na frente, com erro obscuro.
+      - name: Smoke test — parametros SSM publicados
+        run: |
+          set -euo pipefail
+          PARAMS="
+            /oficina/${TF_ENV}/network/vpc_id
+            /oficina/${TF_ENV}/network/private_subnet_ids
+            /oficina/${TF_ENV}/network/public_subnet_ids
+            /oficina/${TF_ENV}/network/vpc_cidr
+            /oficina/${TF_ENV}/db/client_sg_id
+            /oficina/${TF_ENV}/db/endpoint
+            /oficina/${TF_ENV}/db/port
+            /oficina/${TF_ENV}/db/name
+            /oficina/${TF_ENV}/db/secret_arn
+            /oficina/${TF_ENV}/auth/secret_arn
+          "
+          fail=0
+          for p in $PARAMS; do
+            v=$(aws ssm get-parameter --name "$p" --query 'Parameter.Value' --output text 2>/dev/null || echo "")
+            if [ -z "$v" ] || [ "$v" = "None" ]; then
+              echo "::error::parametro ausente ou vazio: $p"; fail=1
+            else
+              echo "ok $p"
+            fi
+          done
+          exit $fail
+
+      - name: Smoke test — RDS disponivel
+        run: |
+          set -euo pipefail
+          st=$(aws rds describe-db-instances \
+                 --db-instance-identifier "oficina-${TF_ENV}-mysql" \
+                 --query 'DBInstances[0].DBInstanceStatus' --output text)
+          echo "status do RDS: $st"
+          [ "$st" = "available" ]
+
+      - name: Smoke test — segredos com o formato contratado
+        run: |
+          set -euo pipefail
+          aws secretsmanager get-secret-value --secret-id "oficina/${TF_ENV}/db" \
+            --query SecretString --output text \
+            | jq -e 'has("host") and has("port") and has("dbname") and has("username") and has("password")' > /dev/null
+          aws secretsmanager get-secret-value --secret-id "oficina/${TF_ENV}/auth" \
+            --query SecretString --output text \
+            | jq -e 'has("JWT_SECRET") and has("JWT_EXPIRATION") and has("ADMIN_USERNAME") and has("ADMIN_PASSWORD") and has("WEBHOOK_TOKEN")' > /dev/null
+          echo "formato dos segredos ok"
+
+      # Marcador de deployment. Este repo nao tem entidade APM propria, entao o
+      # marcador e afixado na entidade da aplicacao (oficina-api-<env>): e la que
+      # se investiga o impacto de uma mudanca de schema ou de rede.
+      - name: Marcar deployment no New Relic
+        if: success()
+        continue-on-error: true
+        env:
+          NEW_RELIC_API_KEY: ${{ secrets.NEW_RELIC_API_KEY }}
+          NEW_RELIC_ACCOUNT_ID: ${{ secrets.NEW_RELIC_ACCOUNT_ID }}
+        run: |
+          set -uo pipefail
+          if [ -z "${NEW_RELIC_API_KEY:-}" ] || [ -z "${NEW_RELIC_ACCOUNT_ID:-}" ]; then
+            echo "credenciais do New Relic ausentes — pulando o marcador"; exit 0
+          fi
+
+          APP_NAME="oficina-api-${TF_ENV}"
+          SEARCH="name = '${APP_NAME}' AND domain = 'APM' AND type = 'APPLICATION'"
+
+          GUID=$(curl -sS -X POST https://api.newrelic.com/graphql \
+            -H "Api-Key: ${NEW_RELIC_API_KEY}" -H 'Content-Type: application/json' \
+            --data "$(jq -n --arg s "$SEARCH" \
+              '{query:"query($s:String!){actor{entitySearch(query:$s){results{entities{guid}}}}}", variables:{s:$s}}')" \
+            | jq -r '.data.actor.entitySearch.results.entities[0].guid // empty')
+
+          if [ -z "$GUID" ]; then
+            echo "entidade ${APP_NAME} ainda nao existe no New Relic — pulando o marcador"; exit 0
+          fi
+
+          curl -sS -X POST https://api.newrelic.com/graphql \
+            -H "Api-Key: ${NEW_RELIC_API_KEY}" -H 'Content-Type: application/json' \
+            --data "$(jq -n --arg g "$GUID" --arg v "$GITHUB_SHA" --arg d "oficina-infra-database apply em ${TF_ENV}" \
+              '{query:"mutation($g:EntityGuid!,$v:String!,$d:String!){changeTrackingCreateDeployment(deployment:{entityGuid:$g,version:$v,user:\"github-actions\",description:$d}){deploymentId}}", variables:{g:$g,v:$v,d:$d}}')"
