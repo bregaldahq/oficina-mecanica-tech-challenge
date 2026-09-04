@@ -56,6 +56,12 @@ Legenda de esforço: 🟢 minutos · 🟡 até 1 hora · 🔴 mais de 1 hora ou 
 | `NEW_RELIC_ACCOUNT_ID` | ✓ | ✓ | ✓ | ✓ |
 | `NEW_RELIC_API_KEY` | ✓ | ✓ | ✓ | ✓ |
 | `NEW_RELIC_INFRA_ENTITY_GUID` | — | ✓ | — | — |
+| `NEW_RELIC_LAMBDA_ENTITY_GUID` | — | — | ✓ | — |
+
+> Os dois `*_ENTITY_GUID` só podem ser preenchidos **depois do primeiro deploy** — o GUID nasce
+> quando o recurso reporta ao New Relic pela primeira vez. As etapas que os usam são
+> `continue-on-error`, então o deploy passa com eles vazios. Volte e preencha depois, se quiser o
+> marcador de deploy nos gráficos de APM.
 
 ---
 
