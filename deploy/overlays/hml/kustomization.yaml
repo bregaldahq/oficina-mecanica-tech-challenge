@@ -7,13 +7,7 @@ namespace: oficina-hml
 resources:
   - ../../base
 
-# Substitui o Namespace da base (nome `oficina`, que não existe em nenhum
-# ambiente real) pelo namespace de homologação.
 patches:
-  - path: namespace.yaml
-    target:
-      kind: Namespace
-      name: oficina
   - path: deployment-patch.yaml
   - path: hpa-patch.yaml
   - path: external-secret-patch.yaml
