@@ -1,0 +1,260 @@
+{
+  "policy": {
+    "name": "Oficina Mecânica · prod",
+    "incidentPreference": "PER_CONDITION_AND_TARGET",
+    "description": "Política de alertas do ambiente de produção. Cada condição abre incidente por alvo (rota, Pod, função), evitando que um único incidente agregue problemas distintos."
+  },
+  "conditions": [
+    {
+      "name": "OS · falha no processamento de Ordem de Serviço",
+      "type": "NRQL_STATIC",
+      "description": "Dispara quando a aplicação registra erros nas rotas de Ordem de Serviço. É o alerta de negócio: OS que não abre, não avança de status ou não recebe aprovação. Runbook: verificar o log estruturado pelo correlation_id e conferir a conexão com o RDS.",
+      "enabled": true,
+      "nrql": {
+        "query": "SELECT count(*) FROM Log WHERE service = 'oficina-api' AND env = 'prod' AND level = 'error' AND path LIKE '/api/service-orders%'"
+      },
+      "signal": {
+        "aggregationWindow": 60,
+        "aggregationMethod": "EVENT_FLOW",
+        "aggregationDelay": 120,
+        "fillOption": "STATIC",
+        "fillValue": 0
+      },
+      "terms": [
+        {
+          "priority": "CRITICAL",
+          "operator": "ABOVE",
+          "threshold": 3,
+          "thresholdDuration": 300,
+          "thresholdOccurrences": "ALL"
+        },
+        {
+          "priority": "WARNING",
+          "operator": "ABOVE",
+          "threshold": 0,
+          "thresholdDuration": 300,
+          "thresholdOccurrences": "ALL"
+        }
+      ],
+      "violationTimeLimitSeconds": 86400
+    },
+    {
+      "name": "API · latência p95 acima de 1500 ms",
+      "type": "NRQL_STATIC",
+      "description": "SLI de latência da aplicação. 1500 ms é o limite acordado; acima disso a experiência degrada mesmo sem erro. Runbook: conferir réplicas x HPA no dashboard de plataforma, CPUCreditBalance do RDS e a aba de rotas para identificar o endpoint lento.",
+      "enabled": true,
+      "nrql": {
+        "query": "SELECT percentile(duration, 95) * 1000 FROM Transaction WHERE appName = 'oficina-api-prod'"
+      },
+      "signal": {
+        "aggregationWindow": 60,
+        "aggregationMethod": "EVENT_FLOW",
+        "aggregationDelay": 120,
+        "fillOption": "NONE"
+      },
+      "terms": [
+        {
+          "priority": "CRITICAL",
+          "operator": "ABOVE",
+          "threshold": 1500,
+          "thresholdDuration": 300,
+          "thresholdOccurrences": "ALL"
+        },
+        {
+          "priority": "WARNING",
+          "operator": "ABOVE",
+          "threshold": 1000,
+          "thresholdDuration": 300,
+          "thresholdOccurrences": "ALL"
+        }
+      ],
+      "violationTimeLimitSeconds": 86400
+    },
+    {
+      "name": "Synthetic · /api/health indisponível",
+      "type": "NRQL_STATIC",
+      "description": "Verificação externa de disponibilidade da API. Como /api/health é liveness e não toca no banco, uma falha aqui significa problema de borda: API Gateway, VPC Link, NLB ou nenhum Pod pronto. Runbook: checar targets registrados no target group e o rollout do Deployment.",
+      "enabled": true,
+      "nrql": {
+        "query": "SELECT count(*) FROM SyntheticCheck WHERE monitorName = 'oficina-prod-health' AND result = 'FAILED'"
+      },
+      "signal": {
+        "aggregationWindow": 60,
+        "aggregationMethod": "EVENT_TIMER",
+        "aggregationTimer": 60,
+        "fillOption": "STATIC",
+        "fillValue": 0
+      },
+      "terms": [
+        {
+          "priority": "CRITICAL",
+          "operator": "ABOVE_OR_EQUALS",
+          "threshold": 2,
+          "thresholdDuration": 300,
+          "thresholdOccurrences": "ALL"
+        }
+      ],
+      "violationTimeLimitSeconds": 86400
+    },
+    {
+      "name": "Cluster · saturação de CPU dos Pods",
+      "type": "NRQL_STATIC",
+      "description": "CPU média dos containers acima de 85% do request por 5 minutos — acima do limiar de 70% do HPA, o que indica que o autoescalonamento não está dando conta (teto de réplicas atingido ou nodes cheios). Runbook: kubectl get hpa e kubectl get pods para checar Pods em Pending.",
+      "enabled": true,
+      "nrql": {
+        "query": "SELECT average(cpuUsedCores / cpuRequestedCores) * 100 FROM K8sContainerSample WHERE namespaceName = 'oficina-prod' AND containerName = 'php-fpm'"
+      },
+      "signal": {
+        "aggregationWindow": 60,
+        "aggregationMethod": "EVENT_FLOW",
+        "aggregationDelay": 120,
+        "fillOption": "NONE"
+      },
+      "terms": [
+        {
+          "priority": "CRITICAL",
+          "operator": "ABOVE",
+          "threshold": 85,
+          "thresholdDuration": 300,
+          "thresholdOccurrences": "ALL"
+        }
+      ],
+      "violationTimeLimitSeconds": 86400
+    },
+    {
+      "name": "Cluster · HPA no teto de réplicas",
+      "type": "NRQL_STATIC",
+      "description": "O HPA está com currentReplicas igual a maxReplicas — não há mais para onde escalar. Complementa o alerta de CPU: indica esgotamento de capacidade e não apenas pico. Runbook: avaliar aumento de maxReplicas e do node group.",
+      "enabled": true,
+      "nrql": {
+        "query": "SELECT latest(currentReplicas) - latest(maxReplicas) FROM K8sHpaSample WHERE hpaName = 'oficina-api' AND namespaceName = 'oficina-prod'"
+      },
+      "signal": {
+        "aggregationWindow": 60,
+        "aggregationMethod": "EVENT_FLOW",
+        "aggregationDelay": 120,
+        "fillOption": "NONE"
+      },
+      "terms": [
+        {
+          "priority": "WARNING",
+          "operator": "ABOVE_OR_EQUALS",
+          "threshold": 0,
+          "thresholdDuration": 600,
+          "thresholdOccurrences": "ALL"
+        }
+      ],
+      "violationTimeLimitSeconds": 86400
+    },
+    {
+      "name": "Cluster · Pods reiniciando",
+      "type": "NRQL_STATIC",
+      "description": "Reinícios de container no namespace de produção — tipicamente OOMKilled ou readinessProbe falhando. Runbook: kubectl describe pod e conferir memória no dashboard de plataforma.",
+      "enabled": true,
+      "nrql": {
+        "query": "SELECT sum(restartCount) FROM K8sContainerSample WHERE namespaceName = 'oficina-prod'"
+      },
+      "signal": {
+        "aggregationWindow": 300,
+        "aggregationMethod": "EVENT_FLOW",
+        "aggregationDelay": 120,
+        "fillOption": "STATIC",
+        "fillValue": 0
+      },
+      "terms": [
+        {
+          "priority": "WARNING",
+          "operator": "ABOVE",
+          "threshold": 2,
+          "thresholdDuration": 600,
+          "thresholdOccurrences": "ALL"
+        }
+      ],
+      "violationTimeLimitSeconds": 86400
+    },
+    {
+      "name": "Lambda auth-cpf · taxa de erro acima de 1%",
+      "type": "NRQL_STATIC",
+      "description": "Erros na Lambda de autenticação por CPF acima de 1% das invocações. Impede o cliente de obter token. Atenção: respostas 400/403/404 de regra de negócio NÃO contam como erro — só exceção não tratada. Runbook: conferir acesso ao RDS pelo SG cliente de banco e a leitura do segredo oficina/prod/auth.",
+      "enabled": true,
+      "nrql": {
+        "query": "SELECT percentage(count(*), WHERE error IS true) FROM AwsLambdaInvocation WHERE entityName = 'oficina-prod-auth-cpf'"
+      },
+      "signal": {
+        "aggregationWindow": 300,
+        "aggregationMethod": "EVENT_FLOW",
+        "aggregationDelay": 120,
+        "fillOption": "NONE"
+      },
+      "terms": [
+        {
+          "priority": "CRITICAL",
+          "operator": "ABOVE",
+          "threshold": 1,
+          "thresholdDuration": 300,
+          "thresholdOccurrences": "ALL"
+        }
+      ],
+      "violationTimeLimitSeconds": 86400
+    },
+    {
+      "name": "Lambda jwt-authorizer · taxa de erro acima de 1%",
+      "type": "NRQL_STATIC",
+      "description": "Erros no authorizer derrubam TODAS as rotas /api/**, e não só o login. Severidade máxima. Runbook: conferir a leitura do segredo e o timeout da função.",
+      "enabled": true,
+      "nrql": {
+        "query": "SELECT percentage(count(*), WHERE error IS true) FROM AwsLambdaInvocation WHERE entityName = 'oficina-prod-jwt-authorizer'"
+      },
+      "signal": {
+        "aggregationWindow": 300,
+        "aggregationMethod": "EVENT_FLOW",
+        "aggregationDelay": 120,
+        "fillOption": "NONE"
+      },
+      "terms": [
+        {
+          "priority": "CRITICAL",
+          "operator": "ABOVE",
+          "threshold": 1,
+          "thresholdDuration": 300,
+          "thresholdOccurrences": "ALL"
+        }
+      ],
+      "violationTimeLimitSeconds": 86400
+    },
+    {
+      "name": "API · taxa de erro 5xx acima de 5%",
+      "type": "NRQL_STATIC",
+      "description": "Erro sistêmico da aplicação. Complementa o alerta de latência: cobre o caso em que a API responde rápido, mas responde errado.",
+      "enabled": true,
+      "nrql": {
+        "query": "SELECT percentage(count(*), WHERE http.statusCode >= 500) FROM Transaction WHERE appName = 'oficina-api-prod'"
+      },
+      "signal": {
+        "aggregationWindow": 60,
+        "aggregationMethod": "EVENT_FLOW",
+        "aggregationDelay": 120,
+        "fillOption": "NONE"
+      },
+      "terms": [
+        {
+          "priority": "CRITICAL",
+          "operator": "ABOVE",
+          "threshold": 5,
+          "thresholdDuration": 300,
+          "thresholdOccurrences": "ALL"
+        }
+      ],
+      "violationTimeLimitSeconds": 86400
+    }
+  ],
+  "syntheticMonitor": {
+    "name": "oficina-prod-health",
+    "type": "SIMPLE",
+    "uri": "https://<apigw-endpoint>/api/health",
+    "period": "EVERY_MINUTE",
+    "status": "ENABLED",
+    "locations": ["AWS_US_EAST_1", "AWS_SA_EAST_1"],
+    "comment": "Substitua <apigw-endpoint> pelo valor de /oficina/prod/apigw/endpoint. Duas localidades evitam falso positivo por problema de rede em uma região."
+  }
+}

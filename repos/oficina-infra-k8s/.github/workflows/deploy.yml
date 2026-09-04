@@ -1,0 +1,106 @@
+name: Deploy
+
+on:
+  push:
+    branches: [develop, main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: us-east-1
+  TF_VERSION: 1.9.8
+
+jobs:
+  apply:
+    name: terraform apply
+    runs-on: ubuntu-latest
+    environment: ${{ github.ref == 'refs/heads/main' && 'producao' || 'homologacao' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve environment
+        id: env
+        run: |
+          if [ "${{ github.ref }}" = "refs/heads/main" ]; then
+            echo "name=prod" >> "$GITHUB_OUTPUT"
+          else
+            echo "name=hml" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: terraform init
+        run: |
+          terraform init -input=false \
+            -backend-config="bucket=${{ secrets.TF_STATE_BUCKET }}" \
+            -backend-config="key=oficina/oficina-infra-k8s/${{ steps.env.outputs.name }}/terraform.tfstate" \
+            -backend-config="region=${{ env.AWS_REGION }}" \
+            -backend-config="dynamodb_table=oficina-tflock" \
+            -backend-config="encrypt=true"
+
+      - name: terraform apply
+        run: |
+          terraform apply -input=false -auto-approve \
+            -var-file=envs/${{ steps.env.outputs.name }}.tfvars \
+            -var="newrelic_license_key=${{ secrets.NEW_RELIC_LICENSE_KEY }}"
+
+      - name: Export outputs
+        id: tf
+        run: |
+          echo "cluster_name=$(terraform output -raw cluster_name)" >> "$GITHUB_OUTPUT"
+          echo "ecr_url=$(terraform output -raw ecr_repository_url)" >> "$GITHUB_OUTPUT"
+
+      # ---- Smoke test -----------------------------------------------------
+      - name: Configure kubectl
+        run: |
+          aws eks update-kubeconfig \
+            --region "${{ env.AWS_REGION }}" \
+            --name "${{ steps.tf.outputs.cluster_name }}"
+
+      - name: Smoke test - kubectl get nodes
+        run: |
+          set -euo pipefail
+          kubectl get nodes -o wide
+          ready=$(kubectl get nodes --no-headers | grep -c ' Ready ' || true)
+          echo "Ready nodes: $ready"
+          test "$ready" -ge 2
+
+      - name: Smoke test - add-ons and namespaces
+        run: |
+          set -euo pipefail
+          kubectl -n kube-system rollout status deployment/metrics-server --timeout=5m
+          kubectl -n kube-system rollout status deployment/aws-load-balancer-controller --timeout=5m
+          kubectl -n external-secrets rollout status deployment/external-secrets --timeout=5m
+          kubectl get clustersecretstore oficina-secretsmanager
+          kubectl get ns oficina-hml oficina-prod
+          # metrics-server must actually answer, otherwise the HPA stays <unknown>
+          kubectl top nodes || echo "metrics not warm yet"
+
+      # ---- New Relic deployment marker ------------------------------------
+      - name: Mark deployment in New Relic
+        if: success()
+        env:
+          NEW_RELIC_API_KEY: ${{ secrets.NEW_RELIC_API_KEY }}
+          NEW_RELIC_ACCOUNT_ID: ${{ secrets.NEW_RELIC_ACCOUNT_ID }}
+        run: |
+          [ -n "${NEW_RELIC_API_KEY:-}" ] || { echo "no NR key, skipping"; exit 0; }
+          curl -sS -X POST https://api.newrelic.com/graphql \
+            -H "Api-Key: ${NEW_RELIC_API_KEY}" \
+            -H 'Content-Type: application/json' \
+            -d "{\"query\":\"mutation { changeTrackingCreateDeployment(deployment: {entityGuid: \\\"${{ secrets.NEW_RELIC_INFRA_ENTITY_GUID }}\\\", version: \\\"${GITHUB_SHA}\\\", user: \\\"${GITHUB_ACTOR}\\\", description: \\\"oficina-infra-k8s ${{ steps.env.outputs.name }}\\\"}) { deploymentId } }\"}" \
+            || echo "New Relic marker failed (non-blocking)"

@@ -1,0 +1,152 @@
+name: PR
+
+on:
+  pull_request:
+    branches: [develop, main]
+
+permissions:
+  id-token: write      # OIDC — nenhuma access key estatica
+  contents: read
+  pull-requests: write # para comentar o plan no PR
+
+env:
+  AWS_REGION: us-east-1
+  TF_VERSION: "1.9.8"
+
+concurrency:
+  group: pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    name: fmt / validate / plan (${{ matrix.environment }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        environment: [hml, prod]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: terraform fmt
+        run: terraform fmt -check -recursive -diff
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: terraform init
+        run: |
+          terraform init \
+            -backend-config="bucket=${{ secrets.TF_STATE_BUCKET }}" \
+            -backend-config="key=oficina/oficina-infra-database/${{ matrix.environment }}/terraform.tfstate" \
+            -backend-config="region=${{ env.AWS_REGION }}" \
+            -backend-config="dynamodb_table=oficina-tflock" \
+            -backend-config="encrypt=true"
+
+      - name: terraform validate
+        run: terraform validate -no-color
+
+      - name: terraform plan
+        id: plan
+        run: |
+          terraform plan -no-color -lock=false \
+            -var-file="envs/${{ matrix.environment }}.tfvars" \
+            -out=tfplan
+          terraform show -no-color tfplan > plan.txt
+        continue-on-error: true
+
+      - name: Comment plan on the PR
+        uses: actions/github-script@v7
+        env:
+          ENVIRONMENT: ${{ matrix.environment }}
+        with:
+          script: |
+            const fs = require('fs');
+            let plan = '';
+            try { plan = fs.readFileSync('plan.txt', 'utf8'); }
+            catch (e) { plan = 'O plan nao foi gerado — veja o log do job.'; }
+            const MAX = 60000;
+            if (plan.length > MAX) {
+              plan = plan.slice(0, MAX) + '\n\n... (truncado, veja o log completo do job)';
+            }
+            const body = [
+              `### Terraform plan — \`${process.env.ENVIRONMENT}\``,
+              '',
+              '<details><summary>Ver plan</summary>',
+              '',
+              '```terraform',
+              plan,
+              '```',
+              '',
+              '</details>',
+            ].join('\n');
+            await github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body,
+            });
+
+      - name: Falhar se o plan falhou
+        if: steps.plan.outcome == 'failure'
+        run: exit 1
+
+  sql-lint:
+    name: Sanidade das migrations
+    runs-on: ubuntu-latest
+
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_DATABASE: oficina_mecanica
+        ports: ["3306:3306"]
+        options: >-
+          --health-cmd="mysqladmin ping -h127.0.0.1 -uroot -proot"
+          --health-interval=10s --health-timeout=5s --health-retries=10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: As migrations nao podem conter CREATE DATABASE, USE ou DELIMITER
+        run: |
+          if grep -inE '^\s*(CREATE DATABASE|USE |DELIMITER)' migrations/*.sql; then
+            echo "::error::migrations/ nao pode conter CREATE DATABASE, USE nem DELIMITER"
+            exit 1
+          fi
+
+      - name: Aplicar todas as migrations em um MySQL 8.0 limpo
+        run: |
+          for f in migrations/*.sql; do
+            echo "== aplicando $f"
+            mysql -h127.0.0.1 -P3306 -uroot -proot oficina_mecanica < "$f"
+          done
+
+      - name: Reaplicar tudo — as migrations precisam ser idempotentes
+        run: |
+          for f in migrations/*.sql; do
+            echo "== reaplicando $f"
+            mysql -h127.0.0.1 -P3306 -uroot -proot oficina_mecanica < "$f"
+          done
+
+      - name: Conferir o dataset de demonstracao
+        run: |
+          mysql -h127.0.0.1 -P3306 -uroot -proot oficina_mecanica -N -e "
+            SELECT CONCAT('ordens=', COUNT(*)) FROM service_orders;
+            SELECT CONCAT('status_distintos=', COUNT(DISTINCT status)) FROM service_orders;
+            SELECT CONCAT('historico=', COUNT(*)) FROM service_order_status_history;
+          "
+          n=$(mysql -h127.0.0.1 -P3306 -uroot -proot oficina_mecanica -N -e "SELECT COUNT(DISTINCT status) FROM service_orders;")
+          if [ "$n" -ne 7 ]; then
+            echo "::error::o seed precisa cobrir os 7 status da maquina de estados (achei $n)"
+            exit 1
+          fi

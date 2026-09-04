@@ -1,0 +1,350 @@
+{
+  "name": "Oficina Mecânica · Plataforma",
+  "description": "Saúde técnica da plataforma: latência e throughput da API, saturação do cluster EKS, comportamento do HPA e desempenho das Lambdas de autenticação. Substitua 0 em accountIds pelo ID da sua conta New Relic e ajuste env/appName nas cláusulas WHERE.",
+  "permissions": "PUBLIC_READ_WRITE",
+  "pages": [
+    {
+      "name": "API",
+      "description": "Latência, throughput e erros da aplicação PHP.",
+      "widgets": [
+        {
+          "title": "Throughput (req/min)",
+          "layout": { "column": 1, "row": 1, "width": 3, "height": 3 },
+          "visualization": { "id": "viz.billboard" },
+          "rawConfiguration": {
+            "nrqlQueries": [
+              {
+                "accountIds": [0],
+                "query": "SELECT rate(count(*), 1 minute) AS 'req/min' FROM Transaction WHERE appName = 'oficina-api-prod' SINCE 30 minutes ago COMPARE WITH 1 day ago"
+              }
+            ],
+            "thresholds": []
+          }
+        },
+        {
+          "title": "Latência p95 (ms)",
+          "layout": { "column": 4, "row": 1, "width": 3, "height": 3 },
+          "visualization": { "id": "viz.billboard" },
+          "rawConfiguration": {
+            "nrqlQueries": [
+              {
+                "accountIds": [0],
+                "query": "SELECT percentile(duration, 95) * 1000 AS 'p95 (ms)' FROM Transaction WHERE appName = 'oficina-api-prod' SINCE 30 minutes ago"
+              }
+            ],
+            "thresholds": [
+              { "alertSeverity": "WARNING", "value": 1000 },
+              { "alertSeverity": "CRITICAL", "value": 1500 }
+            ]
+          }
+        },
+        {
+          "title": "Taxa de erro (%)",
+          "layout": { "column": 7, "row": 1, "width": 3, "height": 3 },
+          "visualization": { "id": "viz.billboard" },
+          "rawConfiguration": {
+            "nrqlQueries": [
+              {
+                "accountIds": [0],
+                "query": "SELECT percentage(count(*), WHERE error IS true) AS 'Erro %' FROM Transaction WHERE appName = 'oficina-api-prod' SINCE 30 minutes ago"
+              }
+            ],
+            "thresholds": [
+              { "alertSeverity": "WARNING", "value": 1 },
+              { "alertSeverity": "CRITICAL", "value": 5 }
+            ]
+          }
+        },
+        {
+          "title": "Apdex",
+          "layout": { "column": 10, "row": 1, "width": 3, "height": 3 },
+          "visualization": { "id": "viz.billboard" },
+          "rawConfiguration": {
+            "nrqlQueries": [
+              {
+                "accountIds": [0],
+                "query": "SELECT apdex(duration, t: 0.5) FROM Transaction WHERE appName = 'oficina-api-prod' SINCE 30 minutes ago"
+              }
+            ],
+            "thresholds": []
+          }
+        },
+        {
+          "title": "Latência p50 / p95 / p99 (ms)",
+          "layout": { "column": 1, "row": 4, "width": 8, "height": 3 },
+          "visualization": { "id": "viz.line" },
+          "rawConfiguration": {
+            "nrqlQueries": [
+              {
+                "accountIds": [0],
+                "query": "SELECT percentile(duration, 50, 95, 99) * 1000 FROM Transaction WHERE appName = 'oficina-api-prod' SINCE 3 hours ago TIMESERIES"
+              }
+            ],
+            "platformOptions": { "ignoreTimeRange": false }
+          }
+        },
+        {
+          "title": "Throughput por rota (req/min)",
+          "layout": { "column": 9, "row": 4, "width": 4, "height": 3 },
+          "visualization": { "id": "viz.line" },
+          "rawConfiguration": {
+            "nrqlQueries": [
+              {
+                "accountIds": [0],
+                "query": "SELECT rate(count(*), 1 minute) FROM Transaction WHERE appName = 'oficina-api-prod' FACET name SINCE 3 hours ago TIMESERIES LIMIT 10"
+              }
+            ],
+            "platformOptions": { "ignoreTimeRange": false }
+          }
+        },
+        {
+          "title": "Latência p50 / p95 / p99 por rota (ms)",
+          "layout": { "column": 1, "row": 7, "width": 8, "height": 3 },
+          "visualization": { "id": "viz.table" },
+          "rawConfiguration": {
+            "nrqlQueries": [
+              {
+                "accountIds": [0],
+                "query": "SELECT count(*) AS 'Requisições', percentile(duration, 50) * 1000 AS 'p50 (ms)', percentile(duration, 95) * 1000 AS 'p95 (ms)', percentile(duration, 99) * 1000 AS 'p99 (ms)', percentage(count(*), WHERE error IS true) AS 'Erro %' FROM Transaction WHERE appName = 'oficina-api-prod' FACET name SINCE 3 hours ago LIMIT 30"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Erros por código HTTP",
+          "layout": { "column": 9, "row": 7, "width": 4, "height": 3 },
+          "visualization": { "id": "viz.stacked-bar" },
+          "rawConfiguration": {
+            "nrqlQueries": [
+              {
+                "accountIds": [0],
+                "query": "SELECT count(*) FROM Transaction WHERE appName = 'oficina-api-prod' AND http.statusCode >= 400 FACET http.statusCode SINCE 3 hours ago TIMESERIES"
+              }
+            ],
+            "platformOptions": { "ignoreTimeRange": false }
+          }
+        },
+        {
+          "title": "Erros da aplicação (log estruturado)",
+          "layout": { "column": 1, "row": 10, "width": 12, "height": 3 },
+          "visualization": { "id": "viz.table" },
+          "rawConfiguration": {
+            "nrqlQueries": [
+              {
+                "accountIds": [0],
+                "query": "SELECT timestamp, correlation_id, method, path, status, exception_class, exception_message FROM Log WHERE service = 'oficina-api' AND env = 'prod' AND level = 'error' SINCE 3 hours ago LIMIT 100"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Cluster e HPA",
+      "description": "Saturação dos Pods e dos nodes, e comportamento do autoescalonamento.",
+      "widgets": [
+        {
+          "title": "Pods prontos x réplicas desejadas",
+          "layout": { "column": 1, "row": 1, "width": 6, "height": 3 },
+          "visualization": { "id": "viz.line" },
+          "rawConfiguration": {
+            "nrqlQueries": [
+              {
+                "accountIds": [0],
+                "query": "SELECT latest(podsAvailable) AS 'Disponíveis', latest(podsDesired) AS 'Desejados' FROM K8sDeploymentSample WHERE deploymentName = 'oficina-api' AND namespaceName = 'oficina-prod' SINCE 3 hours ago TIMESERIES"
+              }
+            ],
+            "platformOptions": { "ignoreTimeRange": false }
+          }
+        },
+        {
+          "title": "HPA — réplicas atuais x mínimo x máximo",
+          "layout": { "column": 7, "row": 1, "width": 6, "height": 3 },
+          "visualization": { "id": "viz.line" },
+          "rawConfiguration": {
+            "nrqlQueries": [
+              {
+                "accountIds": [0],
+                "query": "SELECT latest(currentReplicas) AS 'Atuais', latest(desiredReplicas) AS 'Desejadas', latest(minReplicas) AS 'Mínimo', latest(maxReplicas) AS 'Máximo' FROM K8sHpaSample WHERE hpaName = 'oficina-api' AND namespaceName = 'oficina-prod' SINCE 3 hours ago TIMESERIES"
+              }
+            ],
+            "platformOptions": { "ignoreTimeRange": false }
+          }
+        },
+        {
+          "title": "CPU por Pod (% do request)",
+          "layout": { "column": 1, "row": 4, "width": 6, "height": 3 },
+          "visualization": { "id": "viz.line" },
+          "rawConfiguration": {
+            "nrqlQueries": [
+              {
+                "accountIds": [0],
+                "query": "SELECT average(cpuUsedCores / cpuRequestedCores) * 100 AS 'CPU % do request' FROM K8sContainerSample WHERE containerName = 'php-fpm' AND namespaceName = 'oficina-prod' FACET podName SINCE 3 hours ago TIMESERIES"
+              }
+            ],
+            "platformOptions": { "ignoreTimeRange": false }
+          }
+        },
+        {
+          "title": "Memória por Pod (% do request)",
+          "layout": { "column": 7, "row": 4, "width": 6, "height": 3 },
+          "visualization": { "id": "viz.line" },
+          "rawConfiguration": {
+            "nrqlQueries": [
+              {
+                "accountIds": [0],
+                "query": "SELECT average(memoryWorkingSetBytes / memoryRequestedBytes) * 100 AS 'Memória % do request' FROM K8sContainerSample WHERE containerName = 'php-fpm' AND namespaceName = 'oficina-prod' FACET podName SINCE 3 hours ago TIMESERIES"
+              }
+            ],
+            "platformOptions": { "ignoreTimeRange": false }
+          }
+        },
+        {
+          "title": "Reinícios de container",
+          "layout": { "column": 1, "row": 7, "width": 4, "height": 3 },
+          "visualization": { "id": "viz.billboard" },
+          "rawConfiguration": {
+            "nrqlQueries": [
+              {
+                "accountIds": [0],
+                "query": "SELECT sum(restartCount) AS 'Reinícios' FROM K8sContainerSample WHERE namespaceName = 'oficina-prod' SINCE 3 hours ago"
+              }
+            ],
+            "thresholds": [
+              { "alertSeverity": "WARNING", "value": 1 },
+              { "alertSeverity": "CRITICAL", "value": 5 }
+            ]
+          }
+        },
+        {
+          "title": "Pods fora de Running",
+          "layout": { "column": 5, "row": 7, "width": 4, "height": 3 },
+          "visualization": { "id": "viz.table" },
+          "rawConfiguration": {
+            "nrqlQueries": [
+              {
+                "accountIds": [0],
+                "query": "SELECT latest(status), latest(reason), latest(nodeName) FROM K8sPodSample WHERE namespaceName = 'oficina-prod' AND status != 'Running' FACET podName SINCE 30 minutes ago"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Saturação dos nodes (CPU e memória alocadas)",
+          "layout": { "column": 9, "row": 7, "width": 4, "height": 3 },
+          "visualization": { "id": "viz.line" },
+          "rawConfiguration": {
+            "nrqlQueries": [
+              {
+                "accountIds": [0],
+                "query": "SELECT average(allocatableCpuCoresUtilization) AS 'CPU alocada %', average(allocatableMemoryUtilization) AS 'Memória alocada %' FROM K8sNodeSample WHERE clusterName LIKE 'oficina-prod%' SINCE 3 hours ago TIMESERIES"
+              }
+            ],
+            "platformOptions": { "ignoreTimeRange": false }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Lambdas e gateway",
+      "description": "Duração, cold start, erros das Lambdas de autenticação e tráfego no API Gateway.",
+      "widgets": [
+        {
+          "title": "Invocações por função",
+          "layout": { "column": 1, "row": 1, "width": 4, "height": 3 },
+          "visualization": { "id": "viz.line" },
+          "rawConfiguration": {
+            "nrqlQueries": [
+              {
+                "accountIds": [0],
+                "query": "SELECT count(*) FROM AwsLambdaInvocation WHERE entityName LIKE 'oficina-prod-%' FACET entityName SINCE 3 hours ago TIMESERIES"
+              }
+            ],
+            "platformOptions": { "ignoreTimeRange": false }
+          }
+        },
+        {
+          "title": "Duração p50 / p95 / p99 por função (ms)",
+          "layout": { "column": 5, "row": 1, "width": 8, "height": 3 },
+          "visualization": { "id": "viz.table" },
+          "rawConfiguration": {
+            "nrqlQueries": [
+              {
+                "accountIds": [0],
+                "query": "SELECT count(*) AS 'Invocações', percentile(duration, 50) * 1000 AS 'p50 (ms)', percentile(duration, 95) * 1000 AS 'p95 (ms)', percentile(duration, 99) * 1000 AS 'p99 (ms)', percentage(count(*), WHERE error IS true) AS 'Erro %' FROM AwsLambdaInvocation WHERE entityName LIKE 'oficina-prod-%' FACET entityName SINCE 3 hours ago"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Cold starts — contagem",
+          "layout": { "column": 1, "row": 4, "width": 4, "height": 3 },
+          "visualization": { "id": "viz.line" },
+          "rawConfiguration": {
+            "nrqlQueries": [
+              {
+                "accountIds": [0],
+                "query": "SELECT count(*) AS 'Cold starts' FROM AwsLambdaInvocation WHERE entityName LIKE 'oficina-prod-%' AND provider.coldStart IS true FACET entityName SINCE 3 hours ago TIMESERIES"
+              }
+            ],
+            "platformOptions": { "ignoreTimeRange": false }
+          }
+        },
+        {
+          "title": "Cold start — proporção e duração",
+          "layout": { "column": 5, "row": 4, "width": 4, "height": 3 },
+          "visualization": { "id": "viz.table" },
+          "rawConfiguration": {
+            "nrqlQueries": [
+              {
+                "accountIds": [0],
+                "query": "SELECT percentage(count(*), WHERE provider.coldStart IS true) AS 'Cold start %', average(duration) * 1000 AS 'Duração média (ms)' FROM AwsLambdaInvocation WHERE entityName LIKE 'oficina-prod-%' FACET entityName, provider.coldStart SINCE 1 day ago"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Erros da Lambda auth-cpf (%)",
+          "layout": { "column": 9, "row": 4, "width": 4, "height": 3 },
+          "visualization": { "id": "viz.line" },
+          "rawConfiguration": {
+            "nrqlQueries": [
+              {
+                "accountIds": [0],
+                "query": "SELECT percentage(count(*), WHERE error IS true) AS 'Erro %' FROM AwsLambdaInvocation WHERE entityName = 'oficina-prod-auth-cpf' SINCE 3 hours ago TIMESERIES"
+              }
+            ],
+            "platformOptions": { "ignoreTimeRange": false }
+          }
+        },
+        {
+          "title": "API Gateway — requisições por status (access log)",
+          "layout": { "column": 1, "row": 7, "width": 6, "height": 3 },
+          "visualization": { "id": "viz.stacked-bar" },
+          "rawConfiguration": {
+            "nrqlQueries": [
+              {
+                "accountIds": [0],
+                "query": "SELECT count(*) FROM Log WHERE aws.logGroup LIKE '%oficina-prod-api%' FACET status SINCE 3 hours ago TIMESERIES"
+              }
+            ],
+            "platformOptions": { "ignoreTimeRange": false }
+          }
+        },
+        {
+          "title": "Autorizações negadas (401/403) por rota",
+          "layout": { "column": 7, "row": 7, "width": 6, "height": 3 },
+          "visualization": { "id": "viz.bar" },
+          "rawConfiguration": {
+            "nrqlQueries": [
+              {
+                "accountIds": [0],
+                "query": "SELECT count(*) FROM Log WHERE aws.logGroup LIKE '%oficina-prod-api%' AND status IN ('401', '403') FACET routeKey SINCE 1 day ago"
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

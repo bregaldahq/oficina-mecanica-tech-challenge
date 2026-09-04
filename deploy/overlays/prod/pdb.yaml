@@ -1,0 +1,12 @@
+# Em produção, garante que uma drenagem de nó não derrube a API inteira.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: oficina-api
+  labels:
+    app: oficina-api
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app: oficina-api
