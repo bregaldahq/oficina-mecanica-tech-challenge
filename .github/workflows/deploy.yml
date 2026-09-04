@@ -1,0 +1,187 @@
+name: Deploy
+
+# Seção 9 dos Contratos:
+#   push em `develop` → ambiente `homologacao` (namespace oficina-hml)
+#   push em `main`    → ambiente `producao`    (namespace oficina-prod)
+#
+# Autenticação AWS exclusivamente por OIDC (nenhuma access key estática).
+# Todo o acoplamento com os outros repositórios é lido do SSM Parameter Store.
+on:
+  push:
+    branches: [develop, main]
+  workflow_dispatch:
+    inputs:
+      migrations_ref:
+        description: "Ref do repositório oficina-infra-database com as migrations"
+        required: false
+        default: ""
+
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  id-token: write   # OIDC
+  contents: read
+
+jobs:
+  deploy:
+    name: Build, publish e deploy
+    runs-on: ubuntu-latest
+    environment: ${{ github.ref == 'refs/heads/main' && 'producao' || 'homologacao' }}
+    env:
+      AWS_REGION: us-east-1
+      ENVIRONMENT: ${{ github.ref == 'refs/heads/main' && 'prod' || 'hml' }}
+      OVERLAY: ${{ github.ref == 'refs/heads/main' && 'deploy/overlays/prod' || 'deploy/overlays/hml' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Autenticar na AWS via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: us-east-1
+
+      # ── Descoberta por SSM (nenhum terraform_remote_state entre repos) ─────
+      - name: Ler parâmetros do SSM
+        id: ssm
+        run: |
+          set -euo pipefail
+          get() { aws ssm get-parameter --name "$1" --query 'Parameter.Value' --output text; }
+          ECR_URL=$(get "/oficina/${ENVIRONMENT}/ecr/repository_url")
+          CLUSTER=$(get  "/oficina/${ENVIRONMENT}/eks/cluster_name")
+          TG_ARN=$(get   "/oficina/${ENVIRONMENT}/nlb/target_group_arn")
+          NAMESPACE=$(get "/oficina/${ENVIRONMENT}/eks/namespace")
+          {
+            echo "ecr_url=$ECR_URL"
+            echo "cluster_name=$CLUSTER"
+            echo "target_group_arn=$TG_ARN"
+            echo "namespace=$NAMESPACE"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Login no ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - uses: docker/setup-buildx-action@v3
+
+      # ── Imagem: tag = git sha (seção 8 dos Contratos) ──────────────────────
+      - name: Build e push da imagem
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: production
+          push: true
+          tags: |
+            ${{ steps.ssm.outputs.ecr_url }}:${{ github.sha }}
+            ${{ steps.ssm.outputs.ecr_url }}:${{ env.ENVIRONMENT }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Configurar kubeconfig do EKS
+        run: |
+          aws eks update-kubeconfig \
+            --region "$AWS_REGION" \
+            --name "${{ steps.ssm.outputs.cluster_name }}"
+
+      # A license key não vive no Secrets Manager (é credencial de SaaS, não do
+      # ambiente): vem do segredo de repositório e é aplicada como Secret
+      # próprio, consumido com `optional: true` pelo Deployment.
+      - name: Aplicar Secret da license key do New Relic
+        env:
+          NEW_RELIC_LICENSE_KEY: ${{ secrets.NEW_RELIC_LICENSE_KEY }}
+        run: |
+          kubectl -n "${{ steps.ssm.outputs.namespace }}" create secret generic oficina-newrelic \
+            --from-literal=NEW_RELIC_LICENSE_KEY="$NEW_RELIC_LICENSE_KEY" \
+            --dry-run=client -o yaml | kubectl apply -f -
+
+      # ── Manifests ─────────────────────────────────────────────────────────
+      - name: Fixar imagem e ARN do target group no overlay
+        run: |
+          set -euo pipefail
+          curl -sSL "https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize%2Fv5.4.3/kustomize_v5.4.3_linux_amd64.tar.gz" \
+            | tar xz -C /usr/local/bin kustomize
+          (cd "$OVERLAY" && kustomize edit set image \
+            "oficina-api=${{ steps.ssm.outputs.ecr_url }}:${{ github.sha }}")
+          # O ARN do target group vem do SSM e varia por ambiente (adendo 1 dos
+          # Contratos): o NLB e o TG são do repo oficina-infra-k8s.
+          sed -i "s#TARGET_GROUP_ARN_PLACEHOLDER#${{ steps.ssm.outputs.target_group_arn }}#" \
+            deploy/base/targetgroupbinding.yaml
+          # Ref das migrations: por padrão a mesma do branch em deploy.
+          MIG_REF="${{ inputs.migrations_ref }}"
+          if [ -z "$MIG_REF" ]; then
+            MIG_REF="${{ github.ref == 'refs/heads/main' && 'main' || 'develop' }}"
+          fi
+          sed -i "s#^  MIGRATIONS_REF: .*#  MIGRATIONS_REF: \"$MIG_REF\"#" \
+            deploy/base/migrations-configmap.yaml
+          kubectl kustomize "$OVERLAY"
+
+      - name: Aplicar manifests
+        run: kubectl apply -k "$OVERLAY"
+
+      # ── Migrations ────────────────────────────────────────────────────────
+      # O Job aplica os SQL versionados que vêm do repo oficina-infra-database
+      # (clone em initContainer, ver deploy/base/migration-job.yaml).
+      # A spec de um Job é imutável: apagamos e recriamos a cada deploy.
+      - name: Rodar Job de migration
+        env:
+          NS: ${{ steps.ssm.outputs.namespace }}
+        run: |
+          set -euo pipefail
+          kubectl -n "$NS" delete job oficina-migrate --ignore-not-found --wait=true
+          kubectl -n "$NS" apply -f deploy/base/migration-job.yaml
+          if ! kubectl -n "$NS" wait --for=condition=complete job/oficina-migrate --timeout=600s; then
+            echo "::error::Job de migration falhou"
+            kubectl -n "$NS" logs job/oficina-migrate --all-containers --tail=200 || true
+            exit 1
+          fi
+          kubectl -n "$NS" logs job/oficina-migrate --all-containers --tail=100
+
+      - name: Aguardar rollout
+        env:
+          NS: ${{ steps.ssm.outputs.namespace }}
+        run: |
+          set -euo pipefail
+          if ! kubectl -n "$NS" rollout status deployment/oficina-api --timeout=600s; then
+            kubectl -n "$NS" describe deployment/oficina-api || true
+            kubectl -n "$NS" logs -l app=oficina-api --all-containers --tail=200 || true
+            exit 1
+          fi
+
+      # ── Smoke test ────────────────────────────────────────────────────────
+      - name: Smoke test em /api/ready
+        env:
+          NS: ${{ steps.ssm.outputs.namespace }}
+        run: |
+          set -euo pipefail
+          kubectl -n "$NS" port-forward svc/oficina-api 18080:80 >/tmp/pf.log 2>&1 &
+          PF_PID=$!
+          trap 'kill $PF_PID' EXIT
+          ok=0
+          for _ in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:18080/api/ready > /tmp/ready.json; then ok=1; break; fi
+            sleep 3
+          done
+          [ "$ok" = "1" ] || { echo "::error::/api/ready não respondeu"; cat /tmp/pf.log; exit 1; }
+          cat /tmp/ready.json
+          curl -fsS http://127.0.0.1:18080/api/health > /dev/null
+
+      # ── New Relic ─────────────────────────────────────────────────────────
+      - name: Marcar deployment no New Relic
+        if: success()
+        env:
+          NEW_RELIC_API_KEY: ${{ secrets.NEW_RELIC_API_KEY }}
+          NEW_RELIC_ACCOUNT_ID: ${{ secrets.NEW_RELIC_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          APP_NAME="oficina-api-${ENVIRONMENT}"
+          GUID=$(curl -sS -X POST https://api.newrelic.com/graphql \
+            -H "Api-Key: $NEW_RELIC_API_KEY" -H 'Content-Type: application/json' \
+            -d "{\"query\":\"{ actor { entitySearch(query: \\\"name = '$APP_NAME' AND type = 'APPLICATION'\\\") { results { entities { guid } } } } }\"}" \
+            | jq -r '.data.actor.entitySearch.results.entities[0].guid // empty')
+          if [ -z "$GUID" ]; then
+            echo "::warning::Entidade '$APP_NAME' não encontrada no New Relic; marcação ignorada."
+            exit 0
+          fi
+          curl -sS -X POST https://api.newrelic.com/graphql \
+            -H "Api-Key: $NEW_RELIC_API_KEY" -H 'Content-Type: application/json' \
+            -d "{\"query\":\"mutation { changeTrackingCreateDeployment(deployment: { entityGuid: \\\"$GUID\\\", version: \\\"${GITHUB_SHA}\\\", user: \\\"${GITHUB_ACTOR}\\\", deploymentType: BASIC, description: \\\"Deploy ${ENVIRONMENT} via GitHub Actions\\\" }) { deploymentId } }\"}"

@@ -6,6 +6,7 @@ namespace App\Infrastructure\Repository;
 
 use App\Domain\Entity\Customer;
 use App\Domain\Repository\CustomerRepositoryInterface;
+use App\Domain\ValueObject\CustomerStatus;
 use App\Domain\ValueObject\Document;
 use App\Infrastructure\Database\PdoConnection;
 use PDO;
@@ -47,23 +48,32 @@ class PdoCustomerRepository implements CustomerRepositoryInterface
     public function save(Customer $customer): void
     {
         $stmt = $this->pdo->prepare(
-            'INSERT INTO customers (id, name, document) VALUES (:id, :name, :document)'
+            'INSERT INTO customers (id, name, document, status, email, phone)
+             VALUES (:id, :name, :document, :status, :email, :phone)'
         );
         $stmt->execute([
             ':id'       => $customer->getId(),
             ':name'     => $customer->getName(),
             ':document' => $customer->getDocument()->getValue(),
+            ':status'   => $customer->getStatus()->value,
+            ':email'    => $customer->getEmail(),
+            ':phone'    => $customer->getPhone(),
         ]);
     }
 
     public function update(Customer $customer): void
     {
         $stmt = $this->pdo->prepare(
-            'UPDATE customers SET name = :name WHERE id = :id'
+            'UPDATE customers
+                SET name = :name, status = :status, email = :email, phone = :phone
+              WHERE id = :id'
         );
         $stmt->execute([
-            ':name' => $customer->getName(),
-            ':id'   => $customer->getId(),
+            ':name'   => $customer->getName(),
+            ':status' => $customer->getStatus()->value,
+            ':email'  => $customer->getEmail(),
+            ':phone'  => $customer->getPhone(),
+            ':id'     => $customer->getId(),
         ]);
     }
 
@@ -76,10 +86,15 @@ class PdoCustomerRepository implements CustomerRepositoryInterface
     /** @param array<string, mixed> $row */
     private function hydrate(array $row): Customer
     {
+        // status/email/phone are nullable in the row so the hydration keeps working against
+        // a database that has not received migration 002 yet.
         return Customer::create(
-            id: $row['id'],
-            name: $row['name'],
-            document: new Document($row['document']),
+            id: (string)$row['id'],
+            name: (string)$row['name'],
+            document: new Document((string)$row['document']),
+            status: CustomerStatus::fromString(isset($row['status']) ? (string)$row['status'] : null),
+            email: isset($row['email']) ? (string)$row['email'] : null,
+            phone: isset($row['phone']) ? (string)$row['phone'] : null,
         );
     }
 }
