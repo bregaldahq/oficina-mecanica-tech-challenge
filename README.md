@@ -1,13 +1,13 @@
 # Oficina Mecânica API
 
+[![CI/CD](https://github.com/bregaldahq/oficina-mecanica-tech-challenge/actions/workflows/ci-cd.yml/badge.svg?branch=main)](https://github.com/bregaldahq/oficina-mecanica-tech-challenge/actions/workflows/ci-cd.yml)
 [![PHP](https://img.shields.io/badge/PHP-8.2-blue?logo=php)](https://php.net)
 [![MySQL](https://img.shields.io/badge/MySQL-8.0-orange?logo=mysql)](https://mysql.com)
 [![PHPUnit](https://img.shields.io/badge/Tests-PHPUnit%2011-green)](https://phpunit.de)
 [![OpenAPI](https://img.shields.io/badge/Docs-OpenAPI%203.0-brightgreen)](swagger.yaml)
 [![Docker](https://img.shields.io/badge/Docker-ready-blue?logo=docker)](Dockerfile)
-[![License](https://img.shields.io/badge/License-MIT-yellow)](LICENSE)
 
-Back-end **PHP 8.2 puro** (sem frameworks MVC) para um sistema integrado de atendimento de oficina mecânica. Desenvolvido como **Tech Challenge** da pós-graduação SOAT (Software Architecture) e como portfólio de arquitetura DDD sênior no GitHub.
+API REST cloud-native em **PHP 8.2 puro** (sem frameworks MVC) para gerenciar o ciclo completo de atendimento de uma oficina mecânica. O projeto foi desenvolvido como **Tech Challenge** da pós-graduação SOAT (Software Architecture) e demonstra, na prática, DDD, Clean Architecture, TDD, observabilidade de saúde e automação de infraestrutura e entrega.
 
 ---
 
@@ -375,7 +375,7 @@ repositórios de infraestrutura já aplicados na ordem **database → k8s → la
 
 ```bash
 # 1. Clone o repositório
-git clone <repo-url>
+git clone https://github.com/bregaldahq/oficina-mecanica-tech-challenge.git
 cd oficina-mecanica-tech-challenge
 
 # 2. Configure as variáveis de ambiente
@@ -599,7 +599,3 @@ também uma **coleção Postman** com ambientes prontos em
 - HS256 com segredo simétrico compartilhado entre três consumidores; o caminho para RS256 com
   JWKS está desenhado na RFC-003.
 - RDS sem Multi-AZ, por custo.
-
-Análise completa em [SECURITY_REPORT.md](SECURITY_REPORT.md).
-
----
