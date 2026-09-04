@@ -4,12 +4,14 @@ declare(strict_types=1);
 
 namespace App\Presentation\Middleware;
 
+use App\Infrastructure\Context\RequestContext;
 use App\Infrastructure\Security\JwtProvider;
 
 class AuthMiddleware
 {
     public function __construct(
         private readonly JwtProvider $jwtProvider,
+        private readonly ?RequestContext $context = null,
     ) {
     }
 
@@ -27,7 +29,11 @@ class AuthMiddleware
         $token = substr($header, 7);
 
         try {
-            return $this->jwtProvider->validate($token);
+            $claims = $this->jwtProvider->validate($token);
+            // Publish the subject so logging and the event subscribers can attribute the request.
+            $this->context?->setClaims($claims);
+
+            return $claims;
         } catch (\Throwable) {
             http_response_code(401);
             echo json_encode(['error' => 'Token expirado ou invalido']);

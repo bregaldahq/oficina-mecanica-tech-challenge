@@ -17,7 +17,7 @@ class JwtProviderTest extends TestCase
         $_ENV['JWT_SECRET']     = 'test-secret-key-for-unit-tests';
         $_ENV['JWT_EXPIRATION'] = '3600';
 
-        $this->provider = new JwtProvider();
+        $this->provider = new JwtProvider('test-secret-key-for-unit-tests', 3600);
     }
 
     public function testGenerateReturnsThreeParts(): void
