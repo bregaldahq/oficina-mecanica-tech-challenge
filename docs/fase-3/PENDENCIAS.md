@@ -34,16 +34,30 @@ Legenda de esforço: 🟢 minutos · 🟡 até 1 hora · 🔴 mais de 1 hora ou 
 
 ## Bloco 1 · Repositórios GitHub
 
+> ✅ **Concluído em 04/09/2026.** Os quatro repositórios estão no ar em `bregaldahq`, públicos,
+> com `main` e `develop`, proteção de branch aplicada (PR obrigatório, 1 aprovação,
+> `enforce_admins`, sem force-push e sem deleção) e o avaliador convidado.
+
+| Repositório | Branches | Convite `soat-architecture` |
+|---|---|---|
+| [oficina-mecanica-tech-challenge](https://github.com/bregaldahq/oficina-mecanica-tech-challenge) | `main`, `develop`, `claude/13soat-fase-3-plan-fbe407` | já é colaborador |
+| [oficina-infra-database](https://github.com/bregaldahq/oficina-infra-database) | `main`, `develop` | convite pendente de aceite |
+| [oficina-infra-k8s](https://github.com/bregaldahq/oficina-infra-k8s) | `main`, `develop` | convite pendente de aceite |
+| [oficina-lambda-auth](https://github.com/bregaldahq/oficina-lambda-auth) | `main`, `develop` | convite pendente de aceite |
+
+**O que ainda falta neste bloco:**
+
 | # | Ação | Esforço | Feito quando |
 |---|---|---|---|
-| 1.1 | Instalar e autenticar o `gh` CLI (não existe nesta máquina) | 🟢 | `gh auth status` OK |
-| 1.2 | Rodar o ensaio: `scripts/bootstrap-repos.sh --dry-run` | 🟢 | Saída revisada, sem surpresa |
-| 1.3 | Rodar de verdade: `scripts/bootstrap-repos.sh` | 🟡 | Os 3 repos novos existem, com `main` e `develop` publicadas |
-| 1.4 | Criar a branch `develop` também no repositório da aplicação | 🟢 | `develop` publicada |
 | 1.5 | Configurar os **secrets** nos 4 repositórios (ver tabela abaixo) | 🟡 | `gh secret list` mostra todos |
 | 1.6 | Criar os **environments** `homologacao` e `producao`, com required reviewer em `producao` | 🟢 | Ambos visíveis em Settings → Environments |
-| 1.7 | Confirmar o convite de `soat-architecture` nos 4 repositórios | 🟢 | Convite aceito — **tire print de cada um para o PDF** |
+| 1.7 | Confirmar o **aceite** dos 3 convites pendentes | 🟢 | Aceito — **tire print de cada um para o PDF** |
 | 1.8 | Depois do primeiro pipeline verde, marcar os status checks como obrigatórios na proteção de branch | 🟢 | Checks aparecem como required (só aparecem após rodarem uma vez) |
+
+> ⚠️ **`enforce_admins` está ligado com 1 aprovação obrigatória.** O GitHub não permite aprovar o
+> próprio PR — então **outra pessoa do grupo precisa aprovar** cada PR, inclusive o da Fase 3.
+> Trabalhando sozinho, você fica sem conseguir mergear. Para destravar, desligue `enforce_admins`
+> em Settings → Branches, ou peça a aprovação a um colega.
 
 **Secrets por repositório:**
 
