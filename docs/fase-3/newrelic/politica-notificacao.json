@@ -1,0 +1,78 @@
+{
+  "comment": "Destino, template e workflow de notificação da política 'Oficina Mecânica · prod'. O e-mail é o canal mínimo exigido; o webhook do Slack é opcional e só deve ser criado se houver workspace disponível.",
+  "destinations": [
+    {
+      "name": "Oficina · e-mail do responsável",
+      "type": "EMAIL",
+      "properties": [
+        { "key": "email", "value": "<seu-email@exemplo.com>" }
+      ]
+    },
+    {
+      "name": "Oficina · Slack (opcional)",
+      "type": "WEBHOOK",
+      "properties": [
+        { "key": "url", "value": "<webhook-do-slack>" }
+      ]
+    }
+  ],
+  "channels": [
+    {
+      "name": "Oficina · canal de e-mail",
+      "type": "EMAIL",
+      "product": "IINT",
+      "destinationId": "<id do destino de e-mail>",
+      "properties": [
+        { "key": "subject", "value": "[{{issueTitle}}] {{priority}} · oficina-prod" },
+        { "key": "customDetailsEmail", "value": "Condição: {{#each accumulations.conditionName}}{{this}}{{/each}}\nPrioridade: {{priority}}\nAbertura: {{createdAt}}\nEntidades: {{#each entitiesData.names}}{{this}} {{/each}}\nLink: {{issuePageUrl}}" }
+      ]
+    }
+  ],
+  "workflows": [
+    {
+      "name": "Oficina prod · CRITICAL para e-mail imediato",
+      "workflowEnabled": true,
+      "issuesFilter": {
+        "name": "Críticos da política de produção",
+        "type": "FILTER",
+        "predicates": [
+          { "attribute": "labels.policyIds", "operator": "EXACTLY_MATCHES", "values": ["<id da política>"] },
+          { "attribute": "priority", "operator": "EQUAL", "values": ["CRITICAL"] }
+        ]
+      },
+      "mutingRulesHandling": "NOTIFY_ALL_ISSUES",
+      "destinationConfigurations": [
+        { "channelId": "<id do canal de e-mail>" }
+      ]
+    },
+    {
+      "name": "Oficina prod · WARNING agrupado",
+      "workflowEnabled": true,
+      "issuesFilter": {
+        "name": "Avisos da política de produção",
+        "type": "FILTER",
+        "predicates": [
+          { "attribute": "labels.policyIds", "operator": "EXACTLY_MATCHES", "values": ["<id da política>"] },
+          { "attribute": "priority", "operator": "EQUAL", "values": ["WARNING"] }
+        ]
+      },
+      "mutingRulesHandling": "DONT_NOTIFY_FULLY_OR_PARTIALLY_MUTED_ISSUES",
+      "destinationConfigurations": [
+        { "channelId": "<id do canal de e-mail>" }
+      ]
+    }
+  ],
+  "mutingRules": [
+    {
+      "name": "Janela de deploy",
+      "enabled": false,
+      "description": "Ative manualmente durante um deploy planejado para não gerar incidente por rollout. O deploy.yml já marca o deployment no New Relic, o que permite correlacionar visualmente sem silenciar.",
+      "condition": {
+        "operator": "AND",
+        "conditions": [
+          { "attribute": "conditionName", "operator": "CONTAINS", "values": ["Cluster ·"] }
+        ]
+      }
+    }
+  ]
+}

@@ -1,0 +1,149 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: oficina-api
+  labels:
+    app: oficina-api
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: oficina-api
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: oficina-api
+    spec:
+      # Os containers rodam como www-data não-root. Na base Debian (bookworm) o
+      # www-data é uid/gid 33 — no Alpine era 82. O fsGroup precisa acompanhar,
+      # senão o emptyDir compartilhado não fica gravável e o initContainer de
+      # cópia / a materialização do .env falham.
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 33
+        runAsGroup: 33
+        fsGroup: 33
+      # A imagem de produção traz a aplicação em /var/www/html. Copiamos para um
+      # volume compartilhado para o sidecar Nginx servir os estáticos (Swagger)
+      # enquanto o PHP-FPM executa o código da mesma árvore.
+      initContainers:
+        - name: copy-app
+          image: oficina-api
+          command: ["sh", "-c", "cp -a /var/www/html/. /app-code/"]
+          volumeMounts:
+            - name: app-code
+              mountPath: /app-code
+          resources:
+            requests: { cpu: "50m", memory: "64Mi" }
+            limits:   { cpu: "200m", memory: "128Mi" }
+      containers:
+        - name: php-fpm
+          image: oficina-api
+          envFrom:
+            - configMapRef:
+                name: oficina-config
+            - secretRef:
+                name: oficina-secret
+            # Criado pelo pipeline a partir do segredo de repositório
+            # NEW_RELIC_LICENSE_KEY. Opcional: sem ele o agente fica inerte.
+            - secretRef:
+                name: oficina-newrelic
+                optional: true
+          ports:
+            - containerPort: 9000
+              name: fpm
+          volumeMounts:
+            - name: app-code
+              mountPath: /var/www/html
+          # O PHP-FPM não fala HTTP; as probes HTTP reais ficam no sidecar Nginx,
+          # que é quem responde /api/health e /api/ready.
+          startupProbe:
+            tcpSocket: { port: 9000 }
+            periodSeconds: 5
+            failureThreshold: 30
+          readinessProbe:
+            tcpSocket: { port: 9000 }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket: { port: 9000 }
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: { drop: ["ALL"] }
+          resources:
+            requests: { cpu: "100m", memory: "128Mi" }
+            limits:   { cpu: "500m", memory: "256Mi" }
+        - name: nginx
+          # Imagem unprivileged: o master do Nginx roda como não-root e escuta em 8080
+          # (a imagem oficial exigiria root para bind na porta 80).
+          image: nginxinc/nginx-unprivileged:1.27-alpine
+          ports:
+            - containerPort: 8080
+              name: http
+          volumeMounts:
+            - name: app-code
+              mountPath: /var/www/html
+              readOnly: true
+            - name: nginx-conf
+              mountPath: /etc/nginx/conf.d/default.conf
+              subPath: default.conf
+            - name: nginx-cache
+              mountPath: /var/cache/nginx
+            - name: nginx-run
+              mountPath: /tmp
+          # D18 — liveness em /api/health (não toca no banco) e readiness em
+          # /api/ready (checa o banco). Assim uma queda do RDS tira o Pod do
+          # balanceamento sem provocar um restart loop.
+          startupProbe:
+            httpGet: { path: /api/health, port: 8080 }
+            periodSeconds: 5
+            failureThreshold: 30
+          livenessProbe:
+            httpGet: { path: /api/health, port: 8080 }
+            initialDelaySeconds: 20
+            periodSeconds: 20
+            timeoutSeconds: 3
+            failureThreshold: 3
+          readinessProbe:
+            httpGet: { path: /api/ready, port: 8080 }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          securityContext:
+            allowPrivilegeEscalation: false
+          resources:
+            requests: { cpu: "50m", memory: "32Mi" }
+            limits:   { cpu: "200m", memory: "128Mi" }
+      volumes:
+        - name: app-code
+          emptyDir: {}
+        - name: nginx-cache
+          emptyDir: {}
+        - name: nginx-run
+          emptyDir: {}
+        - name: nginx-conf
+          configMap:
+            name: oficina-nginx
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: oficina-api
+  labels:
+    app: oficina-api
+spec:
+  type: ClusterIP
+  selector:
+    app: oficina-api
+  ports:
+    - port: 80
+      targetPort: 8080
+      name: http
