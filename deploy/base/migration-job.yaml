@@ -80,7 +80,9 @@ spec:
             limits:   { cpu: "500m", memory: "256Mi" }
       containers:
         - name: migrate
-          image: oficina-api
+          # Substituido pelo pipeline. O Job e aplicado com kubectl apply -f, fora do
+          # kustomize, entao "oficina-api" nunca seria resolvido para o ECR.
+          image: APP_IMAGE_PLACEHOLDER
           command: ["php", "bin/migrate.php"]
           env:
             # Diretório de onde o runner lê os arquivos NNN_<slug>.sql.

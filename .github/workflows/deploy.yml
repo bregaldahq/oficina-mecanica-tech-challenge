@@ -106,6 +106,10 @@ jobs:
           # Contratos): o NLB e o TG são do repo oficina-infra-k8s.
           sed -i "s#TARGET_GROUP_ARN_PLACEHOLDER#${{ steps.ssm.outputs.target_group_arn }}#" \
             deploy/base/targetgroupbinding.yaml
+          # O Job de migration e aplicado fora do kustomize (Jobs sao imutaveis, um
+          # apply -k repetido falharia), entao a imagem precisa ser fixada aqui tambem.
+          sed -i "s#APP_IMAGE_PLACEHOLDER#${{ steps.ssm.outputs.ecr_url }}:${{ github.sha }}#" \
+            deploy/base/migration-job.yaml
           # Ref das migrations: por padrão a mesma do branch em deploy.
           MIG_REF="${{ inputs.migrations_ref }}"
           if [ -z "$MIG_REF" ]; then
