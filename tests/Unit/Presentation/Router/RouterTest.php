@@ -54,7 +54,7 @@ class RouterTest extends TestCase
     public function testPublicRouteRunsWithoutToken(): void
     {
         $router = $this->router();
-        $router->get('/api/health', fn() => print('{"status":"ok"}'), requireAuth: false);
+        $router->get('/api/health', fn () => print('{"status":"ok"}'), requireAuth: false);
 
         $this->assertSame('{"status":"ok"}', $this->dispatch($router, 'GET', '/api/health'));
     }
@@ -62,7 +62,7 @@ class RouterTest extends TestCase
     public function testUnknownRouteReturns404(): void
     {
         $router = $this->router();
-        $router->get('/api/health', fn() => print('ok'), requireAuth: false);
+        $router->get('/api/health', fn () => print('ok'), requireAuth: false);
 
         $body = $this->dispatch($router, 'GET', '/api/nope');
 
@@ -75,7 +75,7 @@ class RouterTest extends TestCase
         $this->authenticateAs(['sub' => 'admin', 'role' => 'admin']);
 
         $router = $this->router();
-        $router->get('/api/customers', fn() => print('[]'))->requireRole('admin');
+        $router->get('/api/customers', fn () => print('[]'))->requireRole('admin');
 
         $this->assertSame('[]', $this->dispatch($router, 'GET', '/api/customers'));
     }
@@ -85,7 +85,7 @@ class RouterTest extends TestCase
         $this->authenticateAs(['sub' => 'cust-1', 'role' => 'customer']);
 
         $router = $this->router();
-        $router->get('/api/customers', fn() => print('[]'))->requireRole('admin');
+        $router->get('/api/customers', fn () => print('[]'))->requireRole('admin');
 
         $body = $this->dispatch($router, 'GET', '/api/customers');
 
@@ -131,7 +131,7 @@ class RouterTest extends TestCase
 
         $context = new RequestContext();
         $router  = $this->router($context);
-        $router->get('/api/service-orders/me', fn() => print('[]'))->requireRole('customer', 'admin');
+        $router->get('/api/service-orders/me', fn () => print('[]'))->requireRole('customer', 'admin');
 
         $this->dispatch($router, 'GET', '/api/service-orders/me');
 
@@ -148,7 +148,7 @@ class RouterTest extends TestCase
     public function testTrailingSlashIsIgnored(): void
     {
         $router = $this->router();
-        $router->get('/api/ready', fn() => print('ready'), requireAuth: false);
+        $router->get('/api/ready', fn () => print('ready'), requireAuth: false);
 
         $this->assertSame('ready', $this->dispatch($router, 'GET', '/api/ready/'));
     }
