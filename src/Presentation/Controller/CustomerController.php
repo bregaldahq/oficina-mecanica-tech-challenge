@@ -8,6 +8,7 @@ use App\Domain\Entity\Customer;
 use App\Domain\Exception\DomainException;
 use App\Domain\Repository\CustomerRepositoryInterface;
 use App\Domain\UuidGeneratorInterface;
+use App\Domain\ValueObject\CustomerStatus;
 use App\Domain\ValueObject\Document;
 use App\Presentation\Request\RequestValidator;
 
@@ -55,7 +56,14 @@ class CustomerController
                 return;
             }
 
-            $customer = Customer::create($this->uuidGenerator->generate(), $name, $document);
+            $customer = Customer::create(
+                id: $this->uuidGenerator->generate(),
+                name: $name,
+                document: $document,
+                status: CustomerStatus::fromString(RequestValidator::optionalString($body, 'status')),
+                email: RequestValidator::optionalString($body, 'email'),
+                phone: RequestValidator::optionalString($body, 'phone'),
+            );
             $this->repository->save($customer);
 
             http_response_code(201);
@@ -79,7 +87,24 @@ class CustomerController
         $body    = $this->parseBody();
         $newName = RequestValidator::requireString($body, 'name');
 
-        $updated = Customer::create($customer->getId(), $newName, $customer->getDocument());
+        try {
+            // Absent optional fields keep the current value; the document is immutable.
+            $updated = Customer::create(
+                id: $customer->getId(),
+                name: $newName,
+                document: $customer->getDocument(),
+                status: CustomerStatus::fromString(
+                    RequestValidator::optionalString($body, 'status', $customer->getStatus()->value)
+                ),
+                email: RequestValidator::optionalString($body, 'email', $customer->getEmail()),
+                phone: RequestValidator::optionalString($body, 'phone', $customer->getPhone()),
+            );
+        } catch (DomainException $e) {
+            http_response_code(422);
+            echo json_encode(['error' => $e->getMessage()]);
+            return;
+        }
+
         $this->repository->update($updated);
 
         http_response_code(200);

@@ -20,16 +20,22 @@ O sistema gerencia o ciclo de vida completo de ordens de serviço automotivas: r
 | Categoria | Tecnologia |
 |-----------|-----------|
 | Linguagem | PHP 8.2+ (puro, sem Laravel/Symfony) |
-| Banco de dados | MySQL 8.0 |
-| Autenticação | JWT HS256 implementado em PHP puro |
+| Banco de dados | MySQL 8.0 — Amazon RDS `db.t4g.micro` |
+| Autenticação | JWT HS256 em PHP puro + Lambda Authorizer no API Gateway |
 | Testes | PHPUnit 11 (unitários + integração com SQLite in-memory) |
 | Análise estática | PHPStan nível 8 |
 | Formatação | PHP-CS-Fixer (PSR-12) |
-| Documentação | OpenAPI 3.0 + Swagger UI |
-| Containerização | Docker (multi-stage) + Docker Compose + Nginx |
-| Orquestração | Kubernetes (kind) + Horizontal Pod Autoscaler |
-| Infraestrutura como Código | Terraform |
-| CI/CD | GitHub Actions |
+| Documentação | OpenAPI 3.0 + Swagger UI · ADRs e RFCs em `docs/fase-3/` |
+| Containerização | Docker multi-stage (`php:8.2-fpm-bookworm`) + Nginx |
+| Orquestração | Amazon EKS 1.30 + HPA (2 a 10 réplicas) |
+| Manifestos | Kustomize — `deploy/base` + `deploy/overlays/{hml,prod}` |
+| Entrada | API Gateway HTTP API + VPC Link + NLB interno |
+| Serverless | AWS Lambda (Bref) — `auth-cpf` e `jwt-authorizer` |
+| Segredos | AWS Secrets Manager + External Secrets Operator |
+| Contratos entre stacks | AWS SSM Parameter Store |
+| Infraestrutura como Código | Terraform (3 repositórios dedicados) |
+| CI/CD | GitHub Actions com OIDC (sem access key estática) |
+| Observabilidade | New Relic — APM, logs estruturados, custom events, alertas |
 | Notificações | Email via cliente SMTP próprio (PHP puro) |
 
 ### Por que MySQL?
@@ -40,59 +46,130 @@ O sistema gerencia o ciclo de vida completo de ordens de serviço automotivas: r
 
 ---
 
-## Fase 2 — Evolução Cloud-Native
+## Fase 3 — Arquitetura distribuída na AWS
 
-Esta fase evolui a aplicação da Fase 1 para **qualidade, resiliência e
-escalabilidade**: containerização revisada, orquestração em Kubernetes com
-autoescalonamento, Infraestrutura como Código (Terraform) e pipeline de CI/CD —
-sem abrir mão da Clean Architecture e do TDD.
+A Fase 3 tira a aplicação do cluster local e a coloca em **AWS**, quebrando a entrega em **quatro
+repositórios com ciclos de vida próprios**, adicionando **autenticação do cliente final por CPF** e
+**observabilidade de ponta a ponta** no New Relic.
 
-**Novidades de aplicação:**
+> **Toda a documentação da fase está em [`docs/fase-3/`](docs/fase-3/)** — o documento normativo de
+> contratos entre os repositórios, 10 ADRs, 3 RFCs, diagramas, dashboards e alertas.
 
-- **Listagem de OS ativas** ordenada por prioridade de fluxo
-  (`EXECUTING > AWAITING_APPROVAL > DIAGNOSIS > RECEIVED`, mais antigas primeiro),
-  excluindo logicamente as `FINISHED`/`DELIVERED`.
-- **Aprovação/recusa de orçamento** via webhook externo
-  (`POST /api/service-orders/{id}/approval`), com novo status `REJECTED` e
-  proteção por token (`X-Webhook-Token`).
-- **Notificação por email (SMTP)** a cada mudança de status, via cliente SMTP
-  próprio (sem dependência externa) acionado por eventos de domínio.
+### O que mudou em relação à Fase 2
+
+| Fase 2 | Fase 3 |
+|---|---|
+| Monolito containerizado em cluster kind local | EKS na AWS, atrás de API Gateway |
+| Um repositório com `k8s/` e `infra/` | Quatro repositórios; `k8s/` e `infra/` **removidos** |
+| Manifestos avulsos | **Kustomize** (`deploy/base` + overlays `hml`/`prod`) |
+| MySQL em StatefulSet | **RDS MySQL 8.0** em subnet privada |
+| Segredos em `Secret` do cluster | **Secrets Manager** via External Secrets Operator |
+| Consulta pública de OS por CPF+placa | **Removida** — substituída por `POST /auth/cpf` + `GET /api/service-orders/me` |
+| Só autenticação de admin | Dois papéis: `admin` e `customer` |
+| `ci-cd.yml` único | `pr.yml` + `deploy.yml`, com **OIDC** |
+| Health check único | `/api/health` (liveness) e `/api/ready` (readiness) |
+| Logs não estruturados | **Log JSON** com `correlation_id` propagado |
+| Sem observabilidade | New Relic: APM, logs, custom events de negócio, alertas |
+| HPA 2 → 6 | HPA 2 → 10 |
+
+### Os quatro repositórios
+
+A divisão segue o **ciclo de vida** dos recursos, não as camadas técnicas (ADR-008):
+
+| Repositório | Possui | Muda |
+|---|---|---|
+| `oficina-infra-database` | VPC, subnets, RDS, **todos os segredos**, migrations | raríssimo |
+| `oficina-infra-k8s` | EKS, node group, add-ons, ECR, NLB interno + target group | ocasional |
+| `oficina-lambda-auth` | Lambdas `auth-cpf` e `jwt-authorizer`, API Gateway, VPC Link | ocasional |
+| **`oficina-mecanica-tech-challenge`** (este) | aplicação, `deploy/` em kustomize, Job de migration | diário |
+
+O acoplamento entre eles é **exclusivamente por SSM Parameter Store** — nenhum usa
+`terraform_remote_state` (ADR-008). O repositório de banco é a **camada de fundação**: possui tudo
+que é durável, de modo que o cluster pode ser destruído e recriado sem risco ao dado nem aos
+tokens em circulação (ADR-009).
+
+Ordem de `apply`: **database → k8s → lambda → app**. Ordem de `destroy`: inversa.
 
 ### Arquitetura provisionada
 
 ```mermaid
 flowchart TB
-    user([Clientes / Integrações]) --> ingress[Ingress · port-forward]
-    subgraph ns["Kubernetes — namespace oficina"]
-        ingress --> svc[Service oficina-api]
-        svc --> nginx
-        subgraph pod["Deployment oficina-api · réplicas 2 a 6"]
-            nginx[Nginx :80] --> fpm[PHP-FPM :9000]
+    cliente(["Cliente (CPF)"]) --> apigw
+    admin(["Admin"]) --> apigw
+    apigw["API Gateway HTTP API"]
+    apigw -->|"POST /auth/cpf"| authcpf["Lambda auth-cpf"]
+    apigw -.->|"autoriza ANY /api/proxy+"| authz["Lambda jwt-authorizer<br/>REQUEST · cache 300s"]
+    apigw ==>|"VPC Link"| nlb["NLB interno :80"]
+
+    subgraph vpc["VPC 10.20.0.0/16"]
+        subgraph pub["Subnets públicas · sem NAT"]
+            nodes["EKS node group<br/>2 a 4 x t3.small"]
         end
-        cfg[(ConfigMap)] -. env .-> fpm
-        sec[(Secret)] -. env .-> fpm
-        fpm --> db[(MySQL StatefulSet + PVC)]
-        job[[Job · migração schema.sql]] --> db
-        hpa{{HPA · CPU/Memória}} -. escala .-> pod
+        subgraph priv["Subnets privadas"]
+            nlb
+            rds[("RDS MySQL 8.0")]
+        end
     end
-    fpm -. SMTP .-> mail([Servidor de email])
+
+    nlb --> pods["Deployment oficina-api<br/>2 a 10 Pods · Nginx + PHP-FPM"]
+    nodes -.->|"hospeda"| pods
+    hpa{{"HPA · CPU 70% / memória 80%"}} -.-> pods
+    pods --> rds
+    authcpf --> rds
+    sm[("Secrets Manager")] -.->|"External Secrets"| pods
+    sm -.-> authcpf
+    sm -.-> authz
+    pods --> nr(["New Relic"])
+    authcpf -.-> nr
 ```
 
-### Fluxo de deploy (CI/CD)
+Diagramas completos — componentes com propriedade por repositório, sequência da autenticação com
+todos os ramos de erro e sequência da abertura de OS com telemetria — em
+[`docs/fase-3/diagramas/`](docs/fase-3/diagramas/).
 
-```mermaid
-flowchart LR
-    push[git push main] --> gha[GitHub Actions]
-    gha --> test[Testes<br/>PHPUnit · PHPStan · CS-Fixer]
-    test --> build[Build imagem produção]
-    build --> ghcr[Push GHCR]
-    ghcr --> deploy[Deploy kind<br/>apply k8s + Job migração]
-    deploy --> smoke[Smoke test /api/health]
-```
+### Autenticação e autorização
 
-O provisionamento local equivalente é feito por **Terraform** (`infra/`): cria o
-cluster kind, builda/carrega a imagem, aplica os manifestos e roda a migração com
-um único `terraform apply`.
+Dois públicos, dois caminhos:
+
+| Ator | Como obtém o token | `role` | Alcance |
+|---|---|---|---|
+| **Cliente** | `POST /auth/cpf` (Lambda, no gateway) | `customer` | `GET /api/service-orders/me` e a própria OS |
+| **Admin** | `POST /api/auth/login` (aplicação) | `admin` | todo o `/api/**` |
+| **Webhook** | header `X-Webhook-Token` obrigatório | — | apenas `POST /api/service-orders/{id}/approval` |
+
+Detalhe técnico que determina o desenho: o **JWT Authorizer nativo** do API Gateway HTTP API só
+valida emissores OIDC com JWKS — **não valida HS256**, porque precisaria conhecer o segredo
+simétrico. Por isso a validação fica num **Lambda Authorizer do tipo REQUEST**, com
+`authorizer_result_ttl_in_seconds = 300`. O caminho de evolução para RS256 com JWKS está detalhado
+na [RFC-003](docs/fase-3/rfc/003-estrategia-de-autenticacao.md).
+
+A aplicação **revalida o JWT localmente** em toda rota protegida — defesa em profundidade: ela
+nunca confia em header injetado pelo gateway.
+
+> **Correção de segurança da fase.** A rota pública `GET /api/service-orders/status` aceitava
+> `document` e `license_plate` por query string, sem autenticação, e expunha a OS de qualquer CPF
+> conhecido (OWASP A01 — Broken Access Control). Foi **removida** e substituída por
+> `GET /api/service-orders/me`, que devolve apenas as OS do `sub` do token.
+
+### Observabilidade
+
+- **Log estruturado** em JSON, uma linha por requisição, com `correlation_id` lido de
+  `X-Request-Id`, ou de `X-Amzn-Trace-Id`, ou gerado — e sempre devolvido no header da resposta.
+- **Custom events de negócio** — `ServiceOrderCreated` e `ServiceOrderStatusChanged` — emitidos
+  por um assinante dos **eventos de domínio que já existiam**, sem instrumentação espalhada pelo
+  código. Sem a extensão do New Relic carregada, a emissão é no-op silencioso.
+- **APM** com distributed tracing, `NEW_RELIC_APP_NAME = oficina-api-<env>`.
+- **Dois dashboards** e **nove condições de alerta** prontos para importar, em
+  [`docs/fase-3/newrelic/`](docs/fase-3/newrelic/).
+
+### Decisões documentadas
+
+| | |
+|---|---|
+| **[ADRs](docs/fase-3/adr/)** | 10 decisões arquiteturais, com consequências negativas assumidas e alternativas descartadas |
+| **[RFCs](docs/fase-3/rfc/)** | escolha da nuvem · banco gerenciado · estratégia de autenticação |
+| **[Contratos](docs/fase-3/CONTRATOS.md)** | documento normativo entre os quatro repositórios |
+| **[Roteiro do vídeo](docs/fase-3/ROTEIRO-VIDEO.md)** | roteiro minutado de 15 minutos |
 
 ---
 
@@ -117,8 +194,9 @@ um único `terraform apply`.
                                │ Implementations
 ┌──────────────────────────────▼──────────────────────────────┐
 │                  INFRASTRUCTURE LAYER                        │
-│   PDO Repositories · JwtProvider · UuidGenerator            │
-│   PdoConnection · EnvLoader · InMemoryEventDispatcher       │
+│   PDO Repositories · JwtProvider · UuidGenerator             │
+│   PdoConnection · EnvLoader · InMemoryEventDispatcher        │
+│   JsonLogger · RequestContext · Subscribers de evento        │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -146,8 +224,16 @@ Cada transição é um método nomeado no Aggregate Root — nunca um `setStatus
 Transições inválidas lançam `InvalidStatusTransitionException`.
 
 > `reject()` encerra a OS quando o orçamento é recusado, exposto pelo endpoint
-> `POST /api/service-orders/{id}/approval`. Toda mudança de status emite um evento
-> de domínio que dispara uma notificação por email (quando o SMTP está configurado).
+> `POST /api/service-orders/{id}/approval`.
+
+Toda mudança de status emite um **evento de domínio**, consumido por três assinantes
+independentes — o que permitiu acrescentar histórico e telemetria sem tocar no domínio:
+
+| Assinante | O que faz |
+|---|---|
+| `StatusChangeEmailNotifier` | Notifica por email (quando o SMTP está configurado) |
+| `StatusHistorySubscriber` | Grava a transição em `service_order_status_history` |
+| `NewRelicSubscriber` | Emite `ServiceOrderCreated` / `ServiceOrderStatusChanged` (no-op sem a extensão) |
 
 ### Modelo de Dados
 
@@ -156,29 +242,41 @@ customers ──────────────── vehicles
     │                          │
     └──── service_orders ───────┘
                │
-               ├── service_order_services ── service_catalog
-               │
-               └── service_order_parts ──── parts_inventory
+               ├── service_order_services ─── service_catalog
+               ├── service_order_parts ────── parts_inventory
+               └── service_order_status_history
 ```
+
+O schema é versionado em `migrations/NNN_<slug>.sql` no repositório `oficina-infra-database` e
+aplicado pelo runner `bin/migrate.php`, que controla o que já rodou na tabela `schema_migrations`.
+O modelo de dados completo — diagrama ER, dicionário de dados e a justificativa da escolha do
+MySQL — está documentado naquele repositório e na
+[RFC-002](docs/fase-3/rfc/002-banco-gerenciado.md).
 
 ---
 
 ## Decisões de Design (ADRs)
 
-### ADR-001: PHP puro sem framework MVC
-Demonstra domínio profundo de PHP: DI manual, roteamento regex customizado, autoloading PSR-4. O código é completamente auditável — sem "mágica" de framework.
+As decisões arquiteturais estão registradas como ADRs completas — com contexto, consequências
+positivas **e negativas**, e as alternativas descartadas — em
+**[`docs/fase-3/adr/`](docs/fase-3/adr/)**.
 
-### ADR-002: JWT implementado manualmente
-Pure PHP HMAC-SHA256, sem biblioteca externa. Usa `hash_hmac` nativo e `hash_equals` para comparação resistente a timing attacks.
+| ADR | Decisão |
+|---|---|
+| [001](docs/fase-3/adr/001-php-puro-sem-framework.md) | PHP 8.2 puro, sem framework MVC |
+| [002](docs/fase-3/adr/002-jwt-implementado-manualmente.md) | JWT HS256 implementado manualmente |
+| [003](docs/fase-3/adr/003-state-machine-metodos-nomeados.md) | Máquina de estados com métodos nomeados no Aggregate Root |
+| [004](docs/fase-3/adr/004-transacoes-no-repositorio.md) | Controle transacional dentro do repositório |
+| [005](docs/fase-3/adr/005-reconstitute-para-hidratacao.md) | `reconstitute()` para hidratação do agregado |
+| [006](docs/fase-3/adr/006-comunicacao-sincrona-rest-api-gateway.md) | Comunicação síncrona REST via API Gateway |
+| [007](docs/fase-3/adr/007-hpa-cpu-memoria.md) | Autoescalonamento por HPA em CPU e memória |
+| [008](docs/fase-3/adr/008-quatro-repositorios-acoplamento-ssm.md) | Quatro repositórios com acoplamento por SSM Parameter Store |
+| [009](docs/fase-3/adr/009-banco-como-camada-de-fundacao.md) | O repositório de banco é a camada de fundação |
+| [010](docs/fase-3/adr/010-nodes-em-subnet-publica-sem-nat.md) | Nodes do EKS em subnet pública, sem NAT Gateway |
 
-### ADR-003: State Machine com métodos nomeados
-`changeToDiagnosis()`, `approve()` etc. capturam a linguagem ubíqua do domínio, encapsulam regras de transição e disparam Domain Events semanticamente corretos.
-
-### ADR-004: Transações no repositório
-`PdoServiceOrderRepository::save()` gerencia a transação que persiste a OS, serviços, peças e decrementa o estoque atomicamente. O Use Case não conhece detalhes de persistência.
-
-### ADR-005: `ServiceOrder::reconstitute()` para hidratação
-Construtor `private`. O repositório usa `reconstitute()` para rehidratar o agregado sem disparar eventos nem chamar `decreaseStock()` — elimina setters públicos que vazavam responsabilidades de infraestrutura para o domínio.
+As **RFCs** que fundamentaram as decisões de plataforma estão em
+[`docs/fase-3/rfc/`](docs/fase-3/rfc/): escolha da nuvem, banco gerenciado e estratégia de
+autenticação.
 
 ---
 
@@ -206,69 +304,70 @@ Construtor `private`. O repositório usa `reconstitute()` para rehidratar o agre
 ```
 oficina-mecanica-tech-challenge/
 ├── src/
-│   ├── Domain/
-│   │   ├── Aggregate/              # ServiceOrder (Aggregate Root)
+│   ├── Domain/                     # sem nenhuma dependência externa
+│   │   ├── Aggregate/              # ServiceOrder (Aggregate Root, máquina de estados)
 │   │   ├── Entity/                 # Customer, Vehicle, Part, ServiceItem
 │   │   ├── Event/                  # DomainEventInterface, eventos tipados
 │   │   ├── Exception/              # Exceções de domínio tipadas
+│   │   ├── Notification/           # MailerInterface
 │   │   ├── Repository/             # Interfaces dos repositórios
-│   │   ├── ValueObject/            # Document (CPF/CNPJ), LicensePlate
-│   │   └── UuidGeneratorInterface.php
+│   │   └── ValueObject/            # Document (CPF/CNPJ), LicensePlate, CustomerStatus
 │   ├── Application/
 │   │   ├── DTO/                    # Input DTOs por contexto
 │   │   └── UseCase/                # Use Cases por contexto
 │   ├── Infrastructure/
 │   │   ├── Config/                 # EnvLoader
+│   │   ├── Context/                # RequestContext (correlation_id)
 │   │   ├── Database/               # PdoConnection (Singleton + setInstance)
-│   │   ├── Event/                  # InMemoryEventDispatcher
+│   │   ├── Event/                  # InMemoryEventDispatcher + subscribers
+│   │   ├── Logging/                # JsonLogger (log estruturado, seção 7 dos Contratos)
+│   │   ├── Notification/           # Cliente SMTP próprio
 │   │   ├── Repository/             # Implementações PDO
-│   │   ├── Security/               # JwtProvider (PHP puro, HS256)
-│   │   └── UuidGenerator.php       # UUID v4 via random_bytes()
+│   │   └── Security/               # JwtProvider (PHP puro, HS256)
 │   └── Presentation/
 │       ├── Controller/             # Controllers HTTP
-│       ├── Middleware/             # AuthMiddleware (JWT)
+│       ├── Middleware/             # AuthMiddleware, CorrelationIdMiddleware
 │       ├── Request/                # RequestValidator
-│       └── Router/                 # Roteador regex com suporte a {param}
+│       └── Router/                 # Roteador regex com {param} e requireRole()
 ├── tests/
-│   ├── Unit/
-│   │   ├── Application/UseCase/    # Testes de Use Cases com mocks
-│   │   ├── Domain/Entity/          # Testes de entidades
-│   │   ├── Domain/ValueObject/     # Testes de Document e LicensePlate
-│   │   ├── Domain/Part/
-│   │   ├── Domain/ServiceOrder/
-│   │   ├── Infrastructure/Security/ # JwtProviderTest
-│   │   └── ServiceOrderStateTest.php
-│   └── Integration/
-│       └── PdoServiceOrderRepositoryTest.php  # SQLite in-memory
-├── public/
-│   └── index.php                   # Front controller
+│   ├── Unit/                       # domínio, use cases, infraestrutura, apresentação
+│   └── Integration/                # SQLite in-memory
+├── deploy/                         # manifestos Kubernetes em kustomize
+│   ├── base/                       # Deployment, Service, HPA, ExternalSecret,
+│   │                               # TargetGroupBinding, Job de migration, ConfigMaps
+│   └── overlays/
+│       ├── hml/                    # namespace, réplicas, recursos, tag da imagem
+│       └── prod/                   # + PodDisruptionBudget
 ├── docs/
+│   ├── fase-3/                     # ADRs, RFCs, diagramas, New Relic, Postman, roteiro
+│   ├── DOMAIN-STORYTELLING.md
 │   └── index.html                  # Swagger UI
-├── docker/
-│   └── php/php.ini                 # Configuração PHP para produção
-├── src/Infrastructure/Database/schema.sql
-├── Dockerfile                      # Multi-stage build (vendor → production)
-├── docker-compose.yml
-├── nginx.conf
-├── phpunit.xml
-├── phpstan.neon                    # PHPStan nível 8
-├── .php-cs-fixer.php               # PSR-12
-├── Makefile
-├── k8s/                            # Manifestos Kubernetes (Deployment, Service, HPA, Job…)
-├── infra/                          # Terraform (cluster kind + deploy + banco)
-├── .github/workflows/ci-cd.yml     # Pipeline CI/CD (test → build → deploy)
-├── docker/docker-entrypoint.sh     # Materializa .env de ConfigMap/Secret no cluster
+├── bin/migrate.php                 # runner de migrations versionado (schema_migrations)
+├── scripts/                        # php.sh, composer.sh (execução via Docker)
+├── public/index.php                # front controller + matriz de autorização
+├── docker/                         # php.ini e entrypoint
+├── .github/workflows/
+│   ├── pr.yml                      # lint + testes + análise estática
+│   └── deploy.yml                  # OIDC → ECR → EKS → migration → smoke → New Relic
+├── Dockerfile                      # multi-stage (vendor → dev → production), bookworm
+├── docker-compose.yml · nginx.conf · Makefile
+├── phpunit.xml · phpstan.neon · .php-cs-fixer.php
 ├── swagger.yaml
 └── SECURITY_REPORT.md
 ```
+
+> `k8s/` e `infra/` **não existem mais**. Os manifestos migraram para `deploy/` em kustomize, e o
+> Terraform migrou para os três repositórios de infraestrutura descritos na seção da Fase 3.
 
 ---
 
 ## Pré-requisitos
 
-- Docker 20.10+
-- Docker Compose 2.0+
-- Para implantação em Kubernetes: `kubectl`, `kind` e (opcional) `terraform` 1.5+
+**Para rodar localmente:** Docker 20.10+ e Docker Compose 2.0+. Não é preciso ter PHP nem Composer
+na máquina — `scripts/php.sh` e `scripts/composer.sh` executam tudo dentro de container.
+
+**Para implantar na AWS:** `kubectl`, `awscli` v2, `terraform` 1.5+ e uma conta AWS com os três
+repositórios de infraestrutura já aplicados na ordem **database → k8s → lambda**.
 
 ---
 
@@ -293,8 +392,9 @@ make install
 # 5. Execute as migrações
 make migrate
 
-# 6. Verifique o health check
-curl http://localhost:8080/api/health
+# 6. Verifique os health checks
+curl http://localhost:8080/api/health   # liveness — não toca no banco
+curl http://localhost:8080/api/ready    # readiness — checa o banco
 ```
 
 Acesse:
@@ -307,7 +407,7 @@ Acesse:
 ```bash
 make up        # docker-compose up -d --build
 make install   # composer install (dentro do container)
-make migrate   # executa schema.sql via migrate.php
+make migrate   # runner versionado (bin/migrate.php + schema_migrations)
 make test      # phpunit com cores
 make coverage  # relatório HTML de cobertura
 make analyse   # PHPStan nível 8
@@ -317,120 +417,156 @@ make shell     # acessa o container app
 
 ---
 
-## Implantação (Kubernetes · Terraform · CI/CD)
+## Implantação
 
-### Kubernetes (`k8s/`)
+### Local (Docker Compose)
 
-Manifestos: Namespace, ConfigMap, Secret, ConfigMap do Nginx, **MySQL
-StatefulSet + PVC**, **Deployment** (initContainer copia a app para um volume
-compartilhado; PHP-FPM + Nginx sidecar), Service, **HPA** (2→6 por CPU 70% /
-memória 80%), **Job de migração** e Ingress.
+Coberto na seção anterior — é o caminho para desenvolver e rodar a suíte.
 
-```bash
-# Cluster local + imagem
-docker build --target production -t oficina-api:local .
-kind create cluster --name oficina
-kind load docker-image oficina-api:local --name oficina
+### AWS (kustomize sobre EKS)
 
-# Deploy + migração do banco
-kubectl apply -k k8s/
-kubectl -n oficina rollout status statefulset/oficina-db --timeout=180s
-kubectl apply -f k8s/migration-job.yaml
+Os manifestos vivem em `deploy/`, em **kustomize**: `base` com os recursos comuns e um overlay por
+ambiente definindo namespace, réplicas, recursos e a tag da imagem.
 
-# Acesso
-kubectl -n oficina port-forward svc/oficina-api 8080:80
-curl http://localhost:8080/api/health
+```
+deploy/
+├── base/                  # Deployment (Nginx + PHP-FPM), Service, HPA,
+│                          # ExternalSecret, TargetGroupBinding, Job de migration
+└── overlays/
+    ├── hml/               # namespace oficina-hml
+    └── prod/              # namespace oficina-prod + PodDisruptionBudget
 ```
 
-Detalhes dos recursos e a demo de autoescalonamento (metrics-server) estão em
-[`k8s/README.md`](k8s/README.md).
-
-### Terraform (`infra/`)
+Pré-condição: os três stacks de infraestrutura aplicados. A aplicação lê do SSM tudo de que
+precisa — URL do ECR, nome do cluster, namespace e o ARN do target group.
 
 ```bash
-cd infra
-terraform init
-terraform apply   # cria o cluster kind, builda/carrega a imagem, aplica os manifestos e migra o banco
+# 1. contexto do kubectl
+aws eks update-kubeconfig --region us-east-1 \
+  --name "$(aws ssm get-parameter --name /oficina/prod/eks/cluster_name --query Parameter.Value --output text)"
+
+# 2. imagem para o ECR (tag = git sha)
+ECR=$(aws ssm get-parameter --name /oficina/prod/ecr/repository_url --query Parameter.Value --output text)
+docker build --target production -t "$ECR:$(git rev-parse --short HEAD)" .
+docker push "$ECR:$(git rev-parse --short HEAD)"
+
+# 3. aplicar o overlay
+kubectl apply -k deploy/overlays/prod
+
+# 4. migrations e verificação
+kubectl -n oficina-prod wait --for=condition=complete job/oficina-migrate --timeout=300s
+kubectl -n oficina-prod rollout status deployment/oficina-api
+curl "$(aws ssm get-parameter --name /oficina/prod/apigw/endpoint --query Parameter.Value --output text)/api/health"
 ```
 
-O que é criado e as variáveis disponíveis: [`infra/README.md`](infra/README.md).
+Pontos de integração que valem a leitura antes do primeiro deploy:
+
+- O **`ExternalSecret`** materializa o `Secret` `oficina-secret` a partir do
+  `ClusterSecretStore` **`oficina-secretsmanager`**, criado pelo repositório de cluster.
+- O **`TargetGroupBinding`** registra os IPs dos Pods no target group criado pelo Terraform do
+  repositório de cluster — o NLB **não** nasce de um `Service` do tipo `LoadBalancer`.
+- As probes usam **`/api/health`** (liveness, não toca no banco) e **`/api/ready`** (readiness,
+  checa o banco).
 
 ### CI/CD (GitHub Actions)
 
-[`.github/workflows/ci-cd.yml`](.github/workflows/ci-cd.yml) executa, a cada push para `main`:
+| Workflow | Gatilho | O que faz |
+|---|---|---|
+| [`pr.yml`](.github/workflows/pr.yml) | PR para `develop` ou `main` | PHP-CS-Fixer, PHPUnit e PHPStan nível 8 |
+| [`deploy.yml`](.github/workflows/deploy.yml) | push em `develop` → `homologacao`; push em `main` → `producao` | OIDC → build → ECR → `kubectl apply -k` → Job de migration → smoke test → marca o deployment no New Relic |
 
-1. **Test** — `composer install`, PHPUnit, PHPStan (nível 8) e PHP-CS-Fixer.
-2. **Build** — imagem de produção publicada no GHCR.
-3. **Deploy** — cluster kind efêmero, `kubectl apply` dos manifestos, deploy do
-   banco, Job de migração e smoke test de `/api/health`.
+Autenticação na AWS por **OIDC** (`aws-actions/configure-aws-credentials@v4` com
+`role-to-assume` e `permissions: id-token: write`). **Não existe access key estática** em nenhum
+dos quatro repositórios.
+
+Secrets de repositório esperados: `AWS_ROLE_ARN`, `AWS_ACCOUNT_ID`, `NEW_RELIC_LICENSE_KEY`,
+`NEW_RELIC_ACCOUNT_ID`, `NEW_RELIC_API_KEY`, `TF_STATE_BUCKET`.
 
 ---
 
 ## Como Testar
 
 ```bash
-# Testes unitários + integração
-docker-compose exec app vendor/bin/phpunit
-
-# Cobertura de código (requer Xdebug no container)
-docker-compose exec app vendor/bin/phpunit --coverage-html coverage-report/
-
-# Análise estática
-docker-compose exec app vendor/bin/phpstan analyse
-
-# Formatação PSR-12
-docker-compose exec app vendor/bin/php-cs-fixer fix --diff
+scripts/php.sh vendor/bin/phpunit                    # unitários + integração
+scripts/php.sh vendor/bin/phpstan analyse            # PHPStan nível 8
+scripts/php.sh vendor/bin/php-cs-fixer fix --diff    # PSR-12
 ```
 
-A cobertura foca em `src/Domain` e `src/Application` — as camadas com regras de negócio. Testes de integração usam SQLite in-memory via `PdoConnection::setInstance()`.
+Ou, com o ambiente do Compose no ar: `make test`, `make analyse`, `make lint`, `make coverage`.
+
+**Estado da suíte: 158 testes / 295 asserções verdes, PHPStan nível 8 limpo.**
+
+A cobertura foca em `src/Domain` e `src/Application` — as camadas com regras de negócio. Os testes
+de integração usam SQLite in-memory via `PdoConnection::setInstance()`.
+
+Dois testes merecem destaque:
+
+- **Teste de contrato do token** — gera um JWT com segredo e `iat` fixos e compara com um literal
+  hardcoded. O repositório `oficina-lambda-auth` tem o **mesmo** teste com o **mesmo** literal: se
+  um lado mudar a montagem do token, o outro quebra no CI. É o que sustenta a duplicação
+  deliberada do `JwtProvider` (ADR-002).
+- **Testes da matriz de autorização** — cobrem rota por rota e papel por papel a tabela da seção 5
+  dos Contratos, incluindo o caso em que um `customer` pede uma OS que não é dele e recebe **404**
+  (e não 403, para não vazar a existência do registro).
 
 ---
 
 ## Endpoints da API
 
+### No API Gateway (fora da aplicação)
+
 | Método | Endpoint | Auth | Descrição |
 |--------|----------|:----:|-----------|
-| `GET` | `/api/health` | — | Health check (banco + versão) |
-| `POST` | `/api/auth/login` | — | Autenticação, retorna JWT |
-| `GET` | `/api/customers` | JWT | Listar clientes |
-| `POST` | `/api/customers` | JWT | Criar cliente (CPF ou CNPJ) |
-| `GET` | `/api/customers/{id}` | JWT | Buscar cliente |
-| `PUT` | `/api/customers/{id}` | JWT | Atualizar nome |
-| `DELETE` | `/api/customers/{id}` | JWT | Remover cliente |
-| `GET` | `/api/vehicles` | JWT | Listar veículos |
-| `POST` | `/api/vehicles` | JWT | Cadastrar veículo |
-| `GET` | `/api/vehicles/{id}` | JWT | Buscar veículo |
-| `PUT` | `/api/vehicles/{id}` | JWT | Atualizar brand/model/year |
-| `DELETE` | `/api/vehicles/{id}` | JWT | Remover veículo |
-| `GET` | `/api/parts` | JWT | Listar peças |
-| `POST` | `/api/parts` | JWT | Cadastrar peça |
-| `GET` | `/api/parts/{id}` | JWT | Buscar peça |
-| `PUT` | `/api/parts/{id}` | JWT | Atualizar descrição/preço |
-| `PATCH` | `/api/parts/{id}/stock` | JWT | Repor estoque |
-| `DELETE` | `/api/parts/{id}` | JWT | Remover peça |
-| `GET` | `/api/service-items/metrics` | JWT | Métricas de uso por serviço |
-| `GET` | `/api/service-items` | JWT | Listar catálogo de serviços |
-| `POST` | `/api/service-items` | JWT | Cadastrar serviço |
-| `GET` | `/api/service-items/{id}` | JWT | Buscar serviço |
-| `PUT` | `/api/service-items/{id}` | JWT | Atualizar serviço |
-| `DELETE` | `/api/service-items/{id}` | JWT | Remover serviço |
-| `GET` | `/api/service-orders` | JWT | Listar OS ativas (ordenadas; exclui FINISHED/DELIVERED) |
-| `POST` | `/api/service-orders` | JWT | Criar OS (status: RECEIVED) |
-| `GET` | `/api/service-orders/{id}` | JWT | Buscar OS por ID |
-| `POST` | `/api/service-orders/{id}/items` | JWT | Adicionar serviços e peças |
-| `PATCH` | `/api/service-orders/{id}/status` | JWT | Avançar estado da OS (notifica por email) |
-| `POST` | `/api/service-orders/{id}/approval` | Webhook | Aprovar/recusar orçamento (notificação externa) |
-| `GET` | `/api/service-orders/status` | — | Consulta pública por CPF+placa |
+| `POST` | `/auth/cpf` | — | Autenticação do **cliente** por CPF; servida pela Lambda `auth-cpf`. Retorna JWT com `role=customer` |
 
-> A documentação interativa completa (com exemplos de request/response) está disponível em `/docs/`.
+### Na aplicação
+
+| Método | Endpoint | Acesso | Descrição |
+|--------|----------|:------:|-----------|
+| `GET` | `/api/health` | — | **Liveness** — não toca no banco |
+| `GET` | `/api/ready` | — | **Readiness** — checa o banco |
+| `POST` | `/api/auth/login` | — | Autenticação do **admin**; retorna JWT com `role=admin` |
+| `GET` | `/api/service-orders/me` | `customer` · `admin` | OS do `sub` do token |
+| `GET` | `/api/service-orders/{id}` | `customer` dono · `admin` | Buscar OS (404 se não for dono) |
+| `POST` | `/api/service-orders/{id}/approval` | `X-Webhook-Token` | Aprovar/recusar orçamento (webhook externo) |
+| `GET` | `/api/service-orders` | `admin` | Listar OS ativas (ordenadas; exclui FINISHED/DELIVERED) |
+| `POST` | `/api/service-orders` | `admin` | Criar OS (status inicial `RECEIVED`) |
+| `POST` | `/api/service-orders/{id}/items` | `admin` | Adicionar serviços e peças |
+| `PATCH` | `/api/service-orders/{id}/status` | `admin` | Avançar estado da OS |
+| `GET` `POST` | `/api/customers` | `admin` | Listar / criar cliente (com `status`, `email`, `phone`) |
+| `GET` `PUT` `DELETE` | `/api/customers/{id}` | `admin` | Buscar / atualizar / remover cliente |
+| `GET` `POST` | `/api/vehicles` | `admin` | Listar / cadastrar veículo |
+| `GET` `PUT` `DELETE` | `/api/vehicles/{id}` | `admin` | Buscar / atualizar / remover veículo |
+| `GET` `POST` | `/api/parts` | `admin` | Listar / cadastrar peça |
+| `GET` `PUT` `DELETE` | `/api/parts/{id}` | `admin` | Buscar / atualizar / remover peça |
+| `PATCH` | `/api/parts/{id}/stock` | `admin` | Repor estoque |
+| `GET` | `/api/service-items/metrics` | `admin` | Métricas de uso por serviço |
+| `GET` `POST` | `/api/service-items` | `admin` | Listar / cadastrar serviço do catálogo |
+| `GET` `PUT` `DELETE` | `/api/service-items/{id}` | `admin` | Buscar / atualizar / remover serviço |
+
+> **`GET /api/service-orders/status` foi removida.** Era pública, aceitava `document` e
+> `license_plate` por query string e expunha a OS de qualquer CPF conhecido. Substituída por
+> `POST /auth/cpf` + `GET /api/service-orders/me`.
+
+A documentação interativa completa está em `/docs/` — fonte em [`swagger.yaml`](swagger.yaml). Há
+também uma **coleção Postman** com ambientes prontos em
+[`docs/fase-3/postman/`](docs/fase-3/postman/).
 
 ---
 
-## Entregáveis da Fase 2
+## Entregáveis da Fase 3
 
-- **Documentação da API:** Swagger UI em `/docs/` · fonte [`swagger.yaml`](swagger.yaml)
-- **Manifestos Kubernetes:** [`k8s/`](k8s) · **Terraform:** [`infra/`](infra) · **CI/CD:** [`.github/workflows/ci-cd.yml`](.github/workflows/ci-cd.yml)
-- **Vídeo demonstrativo (≤ 15 min):** _adicionar link do YouTube/Vimeo_ — deploy, execução do CI/CD, consumo das APIs e escalabilidade automática
+| Entregável | Onde |
+|---|---|
+| Documentação da API | Swagger UI em `/docs/` · [`swagger.yaml`](swagger.yaml) · [coleção Postman](docs/fase-3/postman/) |
+| Manifestos Kubernetes (kustomize) | [`deploy/`](deploy) |
+| Infraestrutura como Código | repositórios `oficina-infra-database`, `oficina-infra-k8s`, `oficina-lambda-auth` |
+| CI/CD | [`.github/workflows/pr.yml`](.github/workflows/pr.yml) · [`deploy.yml`](.github/workflows/deploy.yml) |
+| Decisões arquiteturais | [10 ADRs](docs/fase-3/adr/) · [3 RFCs](docs/fase-3/rfc/) |
+| Diagramas | [`docs/fase-3/diagramas/`](docs/fase-3/diagramas/) |
+| Observabilidade | [dashboards e alertas New Relic](docs/fase-3/newrelic/) |
+| Contratos entre repositórios | [`docs/fase-3/CONTRATOS.md`](docs/fase-3/CONTRATOS.md) |
+| Vídeo demonstrativo (≤ 15 min) | _adicionar link_ — [roteiro minutado](docs/fase-3/ROTEIRO-VIDEO.md) |
 
 ---
 
@@ -438,14 +574,28 @@ A cobertura foca em `src/Domain` e `src/Application` — as camadas com regras d
 
 | Medida | Implementação |
 |--------|--------------|
-| Autenticação | JWT HS256 com `hash_equals()` (resistente a timing attacks) |
+| Autenticação | JWT HS256 com `hash_equals()` (resistente a timing attacks), validado na borda **e** revalidado no Pod |
+| Autorização | Matriz por rota e papel (`requireRole`); cliente só acessa a própria OS |
+| Controle de acesso quebrado | Rota pública `GET /api/service-orders/status` **removida** (OWASP A01) |
+| Enumeração de recurso | `GET /api/service-orders/{id}` devolve **404** e não 403 quando o cliente não é o dono |
 | SQL Injection | PDO com `ATTR_EMULATE_PREPARES = false` (prepared statements nativos) |
-| Rate limiting | 5 req/min por IP em `/auth/login` → HTTP 429 + `Retry-After` |
+| Segredos | AWS Secrets Manager + External Secrets Operator; **nunca** em manifesto ou repositório |
+| Credenciais de CI | OIDC com role assumida; **nenhuma access key estática** |
+| Rate limiting | Throttling por rota no API Gateway (saiu da aplicação) |
+| Webhook | `X-Webhook-Token` **obrigatório** — não há mais liberação quando a variável está vazia |
+| Isolamento de rede | RDS em subnet privada, acesso só pelo SG cliente; NLB **interno**; nodes sem ingress público |
 | Headers HTTP | `X-Content-Type-Options`, `X-Frame-Options`, `X-XSS-Protection`, `Referrer-Policy` |
 | Env vars | `EnvLoader` valida variáveis obrigatórias na inicialização |
-| Erros em prod | `APP_DEBUG=false` oculta stack traces nas respostas |
+| Erros em prod | `APP_DEBUG=false` oculta stack traces; o erro é logado com `level=error` sem vazar detalhe na resposta |
+| Rastreabilidade | `correlation_id` em todo log e evento, devolvido em `X-Request-Id` |
 
-Análise completa em [SECURITY_REPORT.md](SECURITY_REPORT.md).
+**Limitações assumidas conscientemente**, documentadas nas ADRs e RFCs:
 
----
-
+- Nodes do EKS em subnet pública, sem NAT Gateway — decisão de custo em contexto acadêmico
+  ([ADR-010](docs/fase-3/adr/010-nodes-em-subnet-publica-sem-nat.md) descreve exatamente o que se
+  perde).
+- CPF sem segundo fator é **identificação**, não autenticação forte; mitigado por autorização
+  restrita ([RFC-003](docs/fase-3/rfc/003-estrategia-de-autenticacao.md)).
+- HS256 com segredo simétrico compartilhado entre três consumidores; o caminho para RS256 com
+  JWKS está desenhado na RFC-003.
+- RDS sem Multi-AZ, por custo.

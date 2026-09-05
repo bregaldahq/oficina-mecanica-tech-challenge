@@ -1,0 +1,83 @@
+name: PR
+
+# Seção 9 dos Contratos: lint + testes + análise estática em todo PR para
+# `develop` ou `main`. Nada é publicado nem implantado aqui.
+on:
+  pull_request:
+    branches: [develop, main]
+
+concurrency:
+  group: pr-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  quality:
+    name: Lint, testes e análise estática
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configurar PHP 8.2
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.2"
+          extensions: pdo, pdo_sqlite, pdo_mysql, mbstring
+          coverage: none
+          tools: composer:v2
+
+      - name: Cache do Composer
+        uses: actions/cache@v4
+        with:
+          path: ~/.composer/cache
+          key: composer-${{ hashFiles('composer.lock') }}
+          restore-keys: composer-
+
+      - name: Instalar dependências
+        run: composer install --no-interaction --prefer-dist --no-progress
+
+      - name: Estilo de código (PSR-12)
+        run: PHP_CS_FIXER_IGNORE_ENV=1 vendor/bin/php-cs-fixer fix --dry-run --diff
+
+      - name: Análise estática (PHPStan)
+        run: vendor/bin/phpstan analyse --no-progress --memory-limit=512M
+
+      - name: Testes unitários e de integração
+        run: vendor/bin/phpunit --no-coverage
+
+  image:
+    name: Build da imagem de produção
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      # Sem push: o PR só valida que a imagem constrói e que o agente do
+      # New Relic carrega (risco nº 1 do projeto — o agente exige glibc).
+      - name: Build (target production)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: production
+          push: false
+          load: true
+          tags: oficina-api:pr
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Verificar que a extensão New Relic carregou
+        run: docker run --rm oficina-api:pr php -m | grep -qi newrelic
+
+  manifests:
+    name: Validação dos manifests kustomize
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Renderizar overlays
+        run: |
+          kubectl kustomize deploy/overlays/hml  > /dev/null
+          kubectl kustomize deploy/overlays/prod > /dev/null

@@ -6,20 +6,57 @@ info:
 
     **Arquitetura:** Domain-Driven Design (DDD) em PHP 8.2 puro, sem frameworks MVC.
 
+    **Autenticação (Fase 3):** um único bearer JWT **HS256** vale para os dois perfis. O token
+    de `role=customer` é emitido pela Lambda `auth-cpf` (`POST /auth/cpf`); o de `role=admin` é
+    emitido pela própria aplicação (`POST /api/auth/login`). Ambos usam o mesmo segredo
+    (`JWT_SECRET`) e o mesmo emissor (`iss: oficina-mecanica-api`), e a aplicação **revalida o
+    token localmente** em toda rota protegida — headers injetados pelo API Gateway nunca são
+    considerados confiáveis.
+
+    Claims: `sub` (id do cliente quando `customer`, usuário admin quando `admin`), `role`,
+    `iss`, `iat`, `exp` e, só para `customer`, `cpf` e `name`.
+
+    **Matriz de autorização:**
+
+    | Rota | Acesso |
+    |---|---|
+    | `GET /api/health` | público — liveness, não toca no banco |
+    | `GET /api/ready` | público — readiness, checa o banco |
+    | `POST /auth/cpf` | público (API Gateway → Lambda) |
+    | `POST /api/auth/login` | público (admin obtém o token) |
+    | `POST /api/service-orders/{id}/approval` | header `X-Webhook-Token` **obrigatório** |
+    | `GET /api/service-orders/me` | `customer` ou `admin` |
+    | `GET /api/service-orders/{id}` | `admin`, ou o `customer` dono da ordem |
+    | **todo o resto de `/api/**`** | `admin` |
+
+    Ou seja: exceto `health`, `ready`, `login`, `approval`, `me` e a consulta de uma ordem pelo
+    próprio dono, **todas as demais rotas exigem `role=admin`** e respondem `403` para um token
+    de cliente.
+
     **Erros:** Todos os erros retornam `{"error": "mensagem descritiva"}`. Códigos:
     - `400` — Campos obrigatórios ausentes ou inválidos
-    - `401` — Token ausente ou inválido
-    - `404` — Recurso não encontrado
+    - `401` — Token ausente, inválido ou expirado
+    - `403` — Token válido, mas sem o perfil exigido pela rota
+    - `404` — Recurso não encontrado (também usado quando um cliente consulta ordem de outro,
+      para não revelar a existência do recurso)
     - `422` — Violação de regra de negócio
-    - `429` — Rate limit excedido (auth/login)
     - `500` — Erro interno do servidor
+
+    > O rate limit de login deixou de ser feito na aplicação (contador em arquivo, inútil com
+    > múltiplos Pods) e passou a ser throttling do API Gateway.
   version: 1.0.0
   contact:
     name: Oficina Mecânica API
 
 servers:
   - url: http://localhost:8080/api
-    description: Ambiente local Docker
+    description: Ambiente local Docker (rotas `/api/**`)
+  - url: https://{apiId}.execute-api.us-east-1.amazonaws.com/api
+    description: API Gateway (hml/prod) — rotas `/api/**` via VPC Link até a aplicação
+    variables:
+      apiId:
+        default: xxxxxxxxxx
+        description: Id do HTTP API publicado em /oficina/<env>/apigw/api_id
 
 tags:
   - name: Sistema
@@ -43,7 +80,15 @@ components:
       type: http
       scheme: bearer
       bearerFormat: JWT
-      description: "Token JWT obtido via POST /api/auth/login"
+      description: |
+        Bearer JWT **HS256** — o mesmo esquema serve aos dois perfis:
+
+        - `role=admin`: token de `POST /api/auth/login` (`sub` = usuário admin).
+        - `role=customer`: token de `POST /auth/cpf`, emitido pela Lambda de autenticação
+          (`sub` = id do cliente, mais as claims `cpf` e `name`).
+
+        A aplicação valida assinatura e expiração localmente e aplica a matriz de autorização
+        descrita na introdução: fora das exceções listadas lá, `/api/**` exige `role=admin`.
 
   responses:
     Unauthorized:
@@ -54,6 +99,14 @@ components:
             $ref: '#/components/schemas/Error'
           example:
             error: Token expirado ou invalido
+    Forbidden:
+      description: Token válido, porém sem o perfil exigido pela rota
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error: Acesso negado.
     NotFound:
       description: Recurso não encontrado
       content:
@@ -81,6 +134,18 @@ components:
           type: string
           example: Mensagem de erro descritiva.
 
+    CustomerStatus:
+      type: string
+      description: |
+        Situação cadastral do cliente. Apenas `ACTIVE` autentica em `POST /auth/cpf`;
+        `INACTIVE` e `BLOCKED` recebem `403`.
+      enum:
+        - ACTIVE
+        - INACTIVE
+        - BLOCKED
+      default: ACTIVE
+      example: ACTIVE
+
     Customer:
       type: object
       properties:
@@ -95,6 +160,28 @@ components:
           type: string
           description: CPF (11 dígitos) ou CNPJ (14 dígitos), apenas dígitos
           example: "52998224725"
+        status:
+          $ref: '#/components/schemas/CustomerStatus'
+        email:
+          type: string
+          format: email
+          nullable: true
+          description: E-mail de contato; `null` quando não informado
+          example: joao.silva@example.com
+        phone:
+          type: string
+          nullable: true
+          description: |
+            Telefone de contato normalizado para apenas dígitos (DDD + número, 10 a 13 dígitos);
+            `null` quando não informado
+          example: "11987654321"
+      example:
+        id: 3fa85f64-5717-4562-b3fc-2c963f66afa6
+        name: João da Silva
+        document: "52998224725"
+        status: ACTIVE
+        email: joao.silva@example.com
+        phone: "11987654321"
 
     Vehicle:
       type: object
@@ -234,11 +321,17 @@ paths:
   /health:
     get:
       tags: [Sistema]
-      summary: Health check da API
+      summary: Liveness — o processo está vivo
+      description: |
+        Sonda de **liveness** do Kubernetes. **Não toca no banco de dados**: uma sonda de
+        liveness acoplada ao banco transforma uma instabilidade momentânea do RDS em reinício
+        em cascata de todos os Pods. A saúde do banco é responsabilidade de `GET /api/ready`.
+
+        Sempre responde `200` enquanto o processo consegue atender.
       security: []
       responses:
         '200':
-          description: API funcionando normalmente
+          description: Processo vivo
           content:
             application/json:
               schema:
@@ -246,30 +339,176 @@ paths:
                 properties:
                   status:
                     type: string
-                    enum: [ok, degraded]
+                    enum: [ok]
                     example: ok
+                  version:
+                    type: string
+                    example: 1.0.0
+                  timestamp:
+                    type: string
+                    format: date-time
+              example:
+                status: ok
+                version: 1.0.0
+                timestamp: '2026-08-26T22:31:04+00:00'
+
+  /ready:
+    get:
+      tags: [Sistema]
+      summary: Readiness — dependências disponíveis
+      description: |
+        Sonda de **readiness**: executa `SELECT 1` no banco. Falhando, o Pod é retirado do
+        balanceador (`503`) sem ser reiniciado.
+      security: []
+      responses:
+        '200':
+          description: Pronto para receber tráfego
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    enum: [ready]
+                    example: ready
                   version:
                     type: string
                     example: 1.0.0
                   database:
                     type: string
-                    enum: [connected, error]
+                    enum: [connected]
                     example: connected
                   timestamp:
                     type: string
                     format: date-time
         '503':
-          description: API degradada (banco de dados indisponível)
+          description: Banco de dados indisponível — Pod não está pronto
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    enum: [not_ready]
+                    example: not_ready
+                  version:
+                    type: string
+                    example: 1.0.0
+                  database:
+                    type: string
+                    enum: [error]
+                    example: error
+                  timestamp:
+                    type: string
+                    format: date-time
+
+  # ── Autenticação ──────────────────────────────────────────────────────────────
+  /auth/cpf:
+    post:
+      tags: [Autenticação]
+      summary: Autenticar cliente por CPF e obter token JWT (perfil customer)
+      description: |
+        **Servida pela Lambda `auth-cpf` através do API Gateway, não pela aplicação PHP.**
+        A rota fica **fora** do prefixo `/api`: no gateway ela é `POST {apigw}/auth/cpf`
+        (nos servidores declarados acima, que já incluem `/api`, use `../auth/cpf`).
+
+        Aceita **somente CPF** (11 dígitos, com ou sem máscara); CNPJ é recusado com `400`.
+        O token devolvido é o mesmo bearer HS256 aceito pela aplicação, com `role=customer`,
+        `sub` = id do cliente e as claims `cpf` e `name`.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [cpf]
+              properties:
+                cpf:
+                  type: string
+                  description: CPF com ou sem máscara
+                  example: 529.982.247-25
+            example:
+              cpf: "52998224725"
+      responses:
+        '200':
+          description: CPF válido e cliente ACTIVE
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  token:
+                    type: string
+                    example: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+                  expiresIn:
+                    type: integer
+                    description: Validade do token em segundos
+                    example: 3600
+                  customer:
+                    type: object
+                    properties:
+                      id:
+                        type: string
+                        format: uuid
+                      name:
+                        type: string
+              example:
+                token: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+                expiresIn: 3600
+                customer:
+                  id: 11111111-1111-4111-8111-111111111111
+                  name: Maria Souza
+        '400':
+          description: |
+            CPF com dígito verificador inválido, CNPJ, ou campo `cpf` ausente/vazio
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
+              examples:
+                cpfInvalido:
+                  summary: Dígito verificador inválido (ou CNPJ)
+                  value:
+                    error: CPF inválido.
+                cpfAusente:
+                  summary: Campo ausente ou vazio
+                  value:
+                    error: O campo cpf é obrigatório.
+        '403':
+          description: Cliente com status INACTIVE ou BLOCKED
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error: Cliente inativo. Procure a oficina.
+        '404':
+          description: CPF não cadastrado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error: Cliente não encontrado.
+        '500':
+          description: Falha de banco ou erro interno
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error: Erro interno.
 
-  # ── Autenticação ──────────────────────────────────────────────────────────────
   /auth/login:
     post:
       tags: [Autenticação]
-      summary: Realizar login e obter token JWT
+      summary: Realizar login do administrador e obter token JWT (perfil admin)
+      description: |
+        Emite o bearer JWT de `role=admin`. É a única rota de `/api/**` liberada sem token pelo
+        authorizer do API Gateway. Throttling é aplicado no estágio do gateway.
       security: []
       requestBody:
         required: true
@@ -311,17 +550,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
-        '429':
-          description: Muitas tentativas de login (rate limit)
-          headers:
-            Retry-After:
-              schema:
-                type: integer
-              description: Segundos até o próximo bloco disponível
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
 
   # ── Clientes ──────────────────────────────────────────────────────────────────
   /customers:
@@ -357,9 +585,27 @@ paths:
                   type: string
                   description: CPF ou CNPJ (com ou sem formatação)
                   example: 529.982.247-25
+                status:
+                  allOf:
+                    - $ref: '#/components/schemas/CustomerStatus'
+                  description: Opcional; assume `ACTIVE` quando ausente
+                email:
+                  type: string
+                  format: email
+                  nullable: true
+                  description: Opcional
+                  example: joao.silva@example.com
+                phone:
+                  type: string
+                  nullable: true
+                  description: Opcional; aceita máscara e é normalizado para dígitos
+                  example: (11) 98765-4321
             example:
               name: João da Silva
               document: "529.982.247-25"
+              status: ACTIVE
+              email: joao.silva@example.com
+              phone: (11) 98765-4321
       responses:
         '201':
           description: Cliente criado com sucesso
@@ -394,7 +640,9 @@ paths:
           $ref: '#/components/responses/NotFound'
     put:
       tags: [Clientes]
-      summary: Atualizar nome do cliente
+      summary: Atualizar cliente (nome, situação e contato)
+      description: |
+        O documento é imutável. Campos opcionais ausentes preservam o valor atual.
       requestBody:
         required: true
         content:
@@ -406,6 +654,26 @@ paths:
                 name:
                   type: string
                   example: João Atualizado da Silva
+                status:
+                  allOf:
+                    - $ref: '#/components/schemas/CustomerStatus'
+                  description: Opcional; mantém o status atual quando ausente
+                email:
+                  type: string
+                  format: email
+                  nullable: true
+                  description: Opcional; mantém o valor atual quando ausente
+                  example: joao.silva@example.com
+                phone:
+                  type: string
+                  nullable: true
+                  description: Opcional; mantém o valor atual quando ausente
+                  example: (11) 98765-4321
+            example:
+              name: João Atualizado da Silva
+              status: BLOCKED
+              email: joao.silva@example.com
+              phone: (11) 98765-4321
       responses:
         '200':
           description: Cliente atualizado
@@ -417,6 +685,8 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '404':
           $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
     delete:
       tags: [Clientes]
       summary: Remover cliente
@@ -860,43 +1130,29 @@ paths:
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
 
-  /service-orders/status:
+  /service-orders/me:
     get:
       tags: [Ordens de Serviço]
-      summary: Consulta pública de status por CPF/CNPJ e placa (sem autenticação)
-      security: []
-      parameters:
-        - name: document
-          in: query
-          required: true
-          schema:
-            type: string
-          example: "52998224725"
-          description: CPF ou CNPJ (apenas dígitos)
-        - name: license_plate
-          in: query
-          required: true
-          schema:
-            type: string
-          example: ABC1234
-          description: Placa sem hífen
-        - name: status
-          in: query
-          required: false
-          schema:
-            $ref: '#/components/schemas/OrderStatus'
-          description: Filtro opcional por status
+      summary: Ordens de serviço do próprio cliente autenticado
+      description: |
+        Devolve **apenas** as ordens do cliente identificado pela claim `sub` do token — o id
+        nunca vem de parâmetro de entrada. Aceita `role=customer` e `role=admin`.
+
+        Substitui a antiga rota pública `GET /api/service-orders/status`, **removida** por
+        aceitar `document` e `license_plate` em query string e expor ordens de qualquer CPF.
       responses:
         '200':
-          description: Ordens encontradas
+          description: Ordens do cliente, das mais recentes para as mais antigas
           content:
             application/json:
               schema:
                 type: array
                 items:
                   $ref: '#/components/schemas/ServiceOrder'
-        '400':
-          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
 
   /service-orders/{id}:
     parameters:
@@ -908,6 +1164,12 @@ paths:
     get:
       tags: [Ordens de Serviço]
       summary: Buscar ordem por ID
+      description: |
+        Acesso: `role=admin`, ou o `role=customer` **dono** da ordem (claim `sub` igual ao
+        cliente da ordem).
+
+        Um cliente que consulta a ordem de outro recebe **`404`, não `403`** — responder `403`
+        confirmaria a existência da ordem.
       responses:
         '200':
           description: Ordem encontrada
@@ -915,8 +1177,15 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ServiceOrder'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
         '404':
-          $ref: '#/components/responses/NotFound'
+          description: |
+            Ordem inexistente — ou pertencente a outro cliente, quando o token é de `customer`
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
 
   /service-orders/{id}/items:
     parameters:
@@ -1054,16 +1323,17 @@ paths:
         - `approved: true` → aprova e move a ordem para `EXECUTING`
         - `approved: false` → recusa e move a ordem para `REJECTED`
 
-        Protegido por token compartilhado: quando `WEBHOOK_TOKEN` está configurado,
-        o header `X-Webhook-Token` é obrigatório.
+        Protegido por token compartilhado: o header `X-Webhook-Token` é **sempre obrigatório**
+        e precisa bater com o segredo `WEBHOOK_TOKEN`. Se o segredo não estiver configurado no
+        ambiente, a rota responde `401` — nunca fica aberta.
       security: []
       parameters:
         - name: X-Webhook-Token
           in: header
-          required: false
+          required: true
           schema:
             type: string
-          description: Token compartilhado do webhook (obrigatório quando configurado)
+          description: Token compartilhado do webhook (obrigatório)
       requestBody:
         required: true
         content:
@@ -1091,7 +1361,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
         '401':
-          description: Token de webhook ausente ou inválido
+          description: Token de webhook ausente, inválido ou não configurado no ambiente
           content:
             application/json:
               schema:

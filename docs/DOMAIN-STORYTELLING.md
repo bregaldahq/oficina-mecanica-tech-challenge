@@ -24,8 +24,9 @@ principais** do sistema e usam exatamente os termos do
 2. O **Atendente** cadastra o **Veículo** (placa) do **Cliente** no **Sistema**.
 3. O **Atendente** abre uma **Ordem de Serviço** para o **Veículo**; o **Sistema**
    devolve o **identificador único** da OS, com status inicial `RECEIVED`.
-4. O **Cliente** consulta o **status da OS** informando CPF/CNPJ e placa, pela
-   rota pública (sem autenticação).
+4. O **Cliente** se **identifica pelo CPF** e recebe do **Sistema** um **token de acesso**.
+5. O **Cliente** consulta, com esse token, **as suas próprias Ordens de Serviço** — e somente
+   elas.
 
 ```mermaid
 sequenceDiagram
@@ -36,8 +37,10 @@ sequenceDiagram
     Atendente->>Sistema: 2. cadastra Veículo (placa)
     Atendente->>Sistema: 3. abre Ordem de Serviço
     Sistema-->>Atendente: identificador único (status RECEIVED)
-    Cliente->>Sistema: 4. consulta status (CPF/CNPJ + placa)
-    Sistema-->>Cliente: situação atual da OS
+    Cliente->>Sistema: 4. identifica-se pelo CPF
+    Sistema-->>Cliente: token de acesso (papel cliente)
+    Cliente->>Sistema: 5. consulta as suas OS (com o token)
+    Sistema-->>Cliente: apenas as OS do próprio Cliente
 ```
 
 ---
@@ -88,4 +91,14 @@ sequenceDiagram
 | Orçamento (cálculo) | `ServiceOrder::calculateTotalAmount()` — atualizado a cada item adicionado |
 | Notificação por email | `ServiceOrderStatusChangedEvent` → `StatusChangeEmailNotifier` |
 | Aprovar / recusar | `ReviewBudgetUseCase` (`POST /api/service-orders/{id}/approval`) |
-| Consulta pública de status | `GetServiceOrderByClientUseCase` (`GET /api/service-orders/status`) |
+| Identificação do Cliente pelo CPF | Lambda `auth-cpf` (`POST /auth/cpf`, no API Gateway) — repositório `oficina-lambda-auth` |
+| Consulta das próprias OS | `ListServiceOrdersByCustomerUseCase` (`GET /api/service-orders/me`) |
+| Histórico de transições | `StatusHistorySubscriber` → `service_order_status_history` |
+| Telemetria de negócio | `NewRelicSubscriber` → eventos `ServiceOrderCreated` e `ServiceOrderStatusChanged` |
+
+> **Mudança da Fase 3.** Na Fase 2, o passo 4 da História 1 era uma **consulta pública** —
+> `GET /api/service-orders/status?document=...&license_plate=...`, sem autenticação, que devolvia
+> a OS de qualquer CPF conhecido. A rota foi **removida**: o Cliente agora se identifica e recebe
+> um token que só alcança o que é dele. A história do domínio mudou junto com o código —
+> identificar-se passou a ser um passo do fluxo, e não um detalhe técnico. Ver
+> [RFC-003](fase-3/rfc/003-estrategia-de-autenticacao.md).

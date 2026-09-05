@@ -6,24 +6,53 @@ namespace App\Infrastructure\Security;
 
 use App\Domain\Exception\DomainException;
 
+/**
+ * HS256 JWT provider.
+ *
+ * The secret, the expiration and the clock are injected so the class can be exercised
+ * deterministically — this is what makes the token contract test (see
+ * tests/Unit/Infrastructure/Security/JwtContractTest.php) possible. The composition root
+ * keeps using self::fromEnv().
+ *
+ * The claim assembly order (payload first, then iss/iat/exp) is part of the cross-repository
+ * contract with the auth Lambda (docs/fase-3/CONTRATOS.md §4) — do not change it.
+ */
 class JwtProvider
 {
-    private readonly string $secret;
-    private readonly int $expiration;
+    public const ISSUER = 'oficina-mecanica-api';
 
-    public function __construct()
+    /** @var \Closure(): int */
+    private readonly \Closure $clock;
+
+    /** @param (\Closure(): int)|null $clock returns the current unix timestamp */
+    public function __construct(
+        private readonly string $secret,
+        private readonly int $expiration = 3600,
+        ?\Closure $clock = null,
+    ) {
+        $this->clock = $clock ?? static fn (): int => time();
+    }
+
+    public static function fromEnv(): self
     {
-        $this->secret     = $_ENV['JWT_SECRET'] ?? 'default-secret-change-me';
-        $this->expiration = (int)($_ENV['JWT_EXPIRATION'] ?? 3600);
+        $secret = $_ENV['JWT_SECRET'] ?? 'default-secret-change-me';
+        assert(is_string($secret));
+
+        return new self($secret, (int)($_ENV['JWT_EXPIRATION'] ?? 3600));
+    }
+
+    public function getExpiration(): int
+    {
+        return $this->expiration;
     }
 
     /** @param array<string, mixed> $payload */
     public function generate(array $payload): string
     {
-        $now = time();
+        $now = ($this->clock)();
 
         $claims = array_merge($payload, [
-            'iss' => 'oficina-mecanica-api',
+            'iss' => self::ISSUER,
             'iat' => $now,
             'exp' => $now + $this->expiration,
         ]);
@@ -59,10 +88,15 @@ class JwtProvider
 
         $payload = json_decode($this->base64urlDecode($body), true);
 
-        if (!isset($payload['exp']) || $payload['exp'] < time()) {
+        if (!is_array($payload)) {
+            throw new DomainException("Token JWT inválido: payload incorreto.");
+        }
+
+        if (!isset($payload['exp']) || $payload['exp'] < ($this->clock)()) {
             throw new DomainException("Token JWT expirado.");
         }
 
+        /** @var array<string, mixed> $payload */
         return $payload;
     }
 
