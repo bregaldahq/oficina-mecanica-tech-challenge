@@ -164,7 +164,7 @@ class ServiceOrder
     {
         $this->requireStatus(self::STATUS_RECEIVED, self::STATUS_DIAGNOSIS);
         $this->status = self::STATUS_DIAGNOSIS;
-        $this->recordEvent(new ServiceOrderStatusChangedEvent($this->id, self::STATUS_RECEIVED, self::STATUS_DIAGNOSIS));
+        $this->recordEvent(new ServiceOrderStatusChangedEvent($this->id, self::STATUS_RECEIVED, self::STATUS_DIAGNOSIS, $this->totalAmount));
     }
 
     public function sendForApproval(): void
@@ -172,35 +172,35 @@ class ServiceOrder
         $this->requireStatus(self::STATUS_DIAGNOSIS, self::STATUS_AWAITING_APPROVAL);
         $this->totalAmount = $this->calculateTotalAmount();
         $this->status      = self::STATUS_AWAITING_APPROVAL;
-        $this->recordEvent(new ServiceOrderStatusChangedEvent($this->id, self::STATUS_DIAGNOSIS, self::STATUS_AWAITING_APPROVAL));
+        $this->recordEvent(new ServiceOrderStatusChangedEvent($this->id, self::STATUS_DIAGNOSIS, self::STATUS_AWAITING_APPROVAL, $this->totalAmount));
     }
 
     public function approve(): void
     {
         $this->requireStatus(self::STATUS_AWAITING_APPROVAL, self::STATUS_EXECUTING);
         $this->status = self::STATUS_EXECUTING;
-        $this->recordEvent(new ServiceOrderStatusChangedEvent($this->id, self::STATUS_AWAITING_APPROVAL, self::STATUS_EXECUTING));
+        $this->recordEvent(new ServiceOrderStatusChangedEvent($this->id, self::STATUS_AWAITING_APPROVAL, self::STATUS_EXECUTING, $this->totalAmount));
     }
 
     public function reject(): void
     {
         $this->requireStatus(self::STATUS_AWAITING_APPROVAL, self::STATUS_REJECTED);
         $this->status = self::STATUS_REJECTED;
-        $this->recordEvent(new ServiceOrderStatusChangedEvent($this->id, self::STATUS_AWAITING_APPROVAL, self::STATUS_REJECTED));
+        $this->recordEvent(new ServiceOrderStatusChangedEvent($this->id, self::STATUS_AWAITING_APPROVAL, self::STATUS_REJECTED, $this->totalAmount));
     }
 
     public function finish(): void
     {
         $this->requireStatus(self::STATUS_EXECUTING, self::STATUS_FINISHED);
         $this->status = self::STATUS_FINISHED;
-        $this->recordEvent(new ServiceOrderStatusChangedEvent($this->id, self::STATUS_EXECUTING, self::STATUS_FINISHED));
+        $this->recordEvent(new ServiceOrderStatusChangedEvent($this->id, self::STATUS_EXECUTING, self::STATUS_FINISHED, $this->totalAmount));
     }
 
     public function deliver(): void
     {
         $this->requireStatus(self::STATUS_FINISHED, self::STATUS_DELIVERED);
         $this->status = self::STATUS_DELIVERED;
-        $this->recordEvent(new ServiceOrderStatusChangedEvent($this->id, self::STATUS_FINISHED, self::STATUS_DELIVERED));
+        $this->recordEvent(new ServiceOrderStatusChangedEvent($this->id, self::STATUS_FINISHED, self::STATUS_DELIVERED, $this->totalAmount));
     }
 
     /** @return array<string, mixed> */

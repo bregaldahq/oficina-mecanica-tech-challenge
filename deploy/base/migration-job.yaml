@@ -1,0 +1,110 @@
+# Job de migration — dono: este repositório (seção 1 dos Contratos).
+#
+# COMO OS ARQUIVOS SQL CHEGAM AQUI
+# --------------------------------
+# As migrations versionadas (`NNN_<slug>.sql`) vivem no repositório
+# `oficina-infra-database`, não neste. A abordagem escolhida é **git clone em um
+# initContainer**, numa ref imutável:
+#
+#   1. o initContainer `fetch-migrations` faz `git clone --depth 1 --branch
+#      $MIGRATIONS_REF $MIGRATIONS_REPO_URL` num emptyDir compartilhado;
+#   2. copia `migrations/` para `/migrations`;
+#   3. o container `migrate` roda `php bin/migrate.php`, que lê os arquivos de
+#      `MIGRATIONS_PATH=/migrations` em ordem lexicográfica e registra cada um
+#      na tabela `schema_migrations`.
+#
+# Por que git clone e não um ConfigMap gerado no pipeline:
+#   * o ConfigMap tem limite rígido de 1 MiB — o conjunto de migrations cresce
+#     indefinidamente ao longo da vida do projeto e um dia estoura;
+#   * o `kubectl kustomize deploy/overlays/*` precisa renderizar offline neste
+#     repositório; um `configMapGenerator` apontando para arquivos que só
+#     existem depois de um checkout do repo de banco quebraria essa validação;
+#   * a ref do clone (`MIGRATIONS_REF`) fica registrada no manifest aplicado,
+#     então o que foi migrado é auditável olhando o Job.
+#
+# O pipeline fixa `MIGRATIONS_REF` na tag/sha desejada com
+# `kubectl set env`/patch antes de aplicar (ver .github/workflows/deploy.yml).
+#
+# O Job é aplicado à parte (não entra na kustomization) porque a spec de um Job
+# é imutável: o pipeline apaga e recria a cada deploy.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: oficina-migrate
+  labels:
+    app: oficina-migrate
+spec:
+  backoffLimit: 3
+  ttlSecondsAfterFinished: 3600
+  template:
+    metadata:
+      labels:
+        app: oficina-migrate
+    spec:
+      restartPolicy: Never
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 33
+        runAsGroup: 33
+        fsGroup: 33
+      initContainers:
+        - name: fetch-migrations
+          image: alpine/git:2.45.2
+          env:
+            - name: MIGRATIONS_REPO_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: oficina-migrations
+                  key: MIGRATIONS_REPO_URL
+            - name: MIGRATIONS_REF
+              valueFrom:
+                configMapKeyRef:
+                  name: oficina-migrations
+                  key: MIGRATIONS_REF
+          command:
+            - sh
+            - -ec
+            - |
+              rm -rf /work/repo
+              git clone --depth 1 --branch "$MIGRATIONS_REF" "$MIGRATIONS_REPO_URL" /work/repo
+              cp /work/repo/migrations/*.sql /migrations/
+              echo "migrations obtidas de $MIGRATIONS_REPO_URL@$MIGRATIONS_REF:"
+              ls -1 /migrations
+          volumeMounts:
+            - name: migrations
+              mountPath: /migrations
+            - name: work
+              mountPath: /work
+          resources:
+            requests: { cpu: "50m", memory: "64Mi" }
+            limits:   { cpu: "500m", memory: "256Mi" }
+      containers:
+        - name: migrate
+          # Substituido pelo pipeline. O Job e aplicado com kubectl apply -f, fora do
+          # kustomize, entao "oficina-api" nunca seria resolvido para o ECR.
+          image: APP_IMAGE_PLACEHOLDER
+          command: ["php", "bin/migrate.php"]
+          env:
+            # Diretório de onde o runner lê os arquivos NNN_<slug>.sql.
+            - name: MIGRATIONS_PATH
+              value: /migrations
+          envFrom:
+            - configMapRef:
+                name: oficina-config
+            - secretRef:
+                name: oficina-secret
+          volumeMounts:
+            - name: migrations
+              mountPath: /migrations
+              readOnly: true
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: { drop: ["ALL"] }
+          resources:
+            requests: { cpu: "100m", memory: "128Mi" }
+            limits:   { cpu: "500m", memory: "256Mi" }
+      volumes:
+        - name: migrations
+          emptyDir: {}
+        - name: work
+          emptyDir: {}

@@ -21,6 +21,12 @@ services:
       - JWT_EXPIRATION=${JWT_EXPIRATION:-3600}
       - ADMIN_USERNAME=${ADMIN_USERNAME}
       - ADMIN_PASSWORD=${ADMIN_PASSWORD}
+      - WEBHOOK_TOKEN=${WEBHOOK_TOKEN:-}
+      # New Relic: sem license key o agente fica carregado porém inerte
+      # (ver docker/docker-entrypoint.sh). Nada é enviado em desenvolvimento.
+      - NEW_RELIC_LICENSE_KEY=${NEW_RELIC_LICENSE_KEY:-}
+      - NEW_RELIC_APP_NAME=${NEW_RELIC_APP_NAME:-oficina-api-local}
+      - NEW_RELIC_DISTRIBUTED_TRACING_ENABLED=${NEW_RELIC_DISTRIBUTED_TRACING_ENABLED:-true}
     depends_on:
       db:
         condition: service_healthy
@@ -44,13 +50,15 @@ services:
     depends_on:
       - app
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost/api/health"]
+      test: ["CMD", "wget", "-qO-", "http://localhost/api/health"]
       interval: 30s
       timeout: 10s
       retries: 3
     networks:
       - oficina_network
 
+  # Ambiente de desenvolvimento: o MySQL continua em container. Em hml/prod o
+  # banco é o RDS provisionado pelo repositório oficina-infra-database.
   db:
     image: mysql:8.0
     container_name: oficina_db

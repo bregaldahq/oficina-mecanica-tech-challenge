@@ -1,0 +1,23 @@
+# Adendo 1 dos Contratos: o NLB interno e o target group são criados pelo
+# Terraform do repositório `oficina-infra-k8s`. A aplicação NÃO cria um segundo
+# NLB (nada de Service type=LoadBalancer nem de annotations
+# `aws-load-balancer-type: external`): o Service é um ClusterIP simples e este
+# TargetGroupBinding (CRD do AWS Load Balancer Controller) registra os Pods do
+# Service no target group já existente.
+#
+# O ARN vem de /oficina/<env>/nlb/target_group_arn (SSM) e varia por ambiente,
+# então fica como placeholder: o pipeline o substitui no overlay antes do apply,
+# do mesmo modo que faz com a tag da imagem
+# (ver .github/workflows/deploy.yml, passo "Resolver ARN do target group").
+apiVersion: elbv2.k8s.aws/v1beta1
+kind: TargetGroupBinding
+metadata:
+  name: oficina-api
+  labels:
+    app: oficina-api
+spec:
+  serviceRef:
+    name: oficina-api
+    port: 80
+  targetType: ip
+  targetGroupARN: TARGET_GROUP_ARN_PLACEHOLDER
