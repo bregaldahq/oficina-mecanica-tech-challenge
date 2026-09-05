@@ -1,137 +1,138 @@
 # Pendências — o que depende de você
 
-Todo o desenvolvimento que não exigia credencial, conta ou decisão sua está **pronto e
-verificado**. Este documento lista o que sobrou, na ordem em que precisa ser executado.
-
-**Nada aqui foi executado automaticamente de propósito.** Criar repositórios públicos na sua conta
-GitHub e provisionar recursos cobrados na AWS são ações externas e de difícil reversão — a decisão
-é sua.
+Estado real do projeto e o que falta para a entrega. Atualizado após a execução completa
+dos Blocos 0, 1 e 2 em homologação.
 
 Legenda de esforço: 🟢 minutos · 🟡 até 1 hora · 🔴 mais de 1 hora ou espera externa
 
 ---
 
-## Bloco 0 · Contas e bootstrap
+## Estado atual
 
-> Tudo aqui é pré-requisito do primeiro `terraform apply`. O bootstrap do state **não pode** estar
-> no Terraform — seria dependência circular.
+**O sistema está no ar e validado ponta a ponta em homologação.**
 
-| # | Ação | Esforço | Feito quando |
-|---|---|---|---|
-| 0.1 | Criar/confirmar a conta AWS, ativar MFA no root e criar um usuário IAM administrativo | 🟡 | `aws sts get-caller-identity` responde |
-| 0.2 | **Criar o AWS Budget com alerta em US$ 20 e outro em US$ 50** — antes de qualquer apply | 🟢 | Budget visível no console, e-mail de teste recebido |
-| 0.3 | Criar o bucket de state `oficina-tfstate-<sufixo>` com versionamento e criptografia | 🟢 | `aws s3 ls` mostra o bucket |
-| 0.4 | Criar a tabela DynamoDB `oficina-tflock` com chave de partição `LockID` (String) | 🟢 | Tabela `ACTIVE` |
-| 0.5 | Criar o OIDC provider do GitHub (`token.actions.githubusercontent.com`) na conta AWS | 🟢 | Provider listado em IAM → Identity providers |
-| 0.6 | Criar **4 roles IAM** `oficina-gha-<repo>`, cada uma com trust policy restrita a `repo:bregaldahq/<repo>:*` | 🟡 | As 4 roles existem |
-| 0.7 | **Pedir aumento de quota de vCPU on-demand** se a conta for nova | 🔴 espera de horas a 2 dias úteis | Quota aprovada — comece por aqui, é o item de maior latência |
-| 0.8 | Criar a conta New Relic (free tier permanente) e obter **account ID**, **license key** e **user API key** | 🟡 | As três chaves em mãos |
+`https://lkdvezfrm5.execute-api.us-east-1.amazonaws.com`
 
-> **Comece pelo 0.7.** A aprovação de quota é a única coisa aqui que depende de terceiros e pode
-> travar todo o resto por dois dias.
+| Verificação executada ao vivo | Resultado |
+|---|---|
+| `POST /auth/cpf` com CPF de cliente ativo | **200** com JWT |
+| `POST /auth/cpf` com CPF de cliente inativo | **403** `Cliente inativo. Procure a oficina.` |
+| `POST /auth/cpf` com CPF válido não cadastrado | **404** `Cliente não encontrado.` |
+| `POST /auth/cpf` com dígito verificador inválido | **400** `CPF inválido.` |
+| `GET /api/service-orders/me` com o token da Lambda | **200**, escopado pelo `sub` |
+| `GET /api/customers` com token de cliente | **403** `Acesso negado.` |
+| Rota protegida sem token | **401** no gateway |
 
----
+O contrato de JWT entre a função serverless e a aplicação — repositórios separados, deploys
+independentes — está provado em produção, não apenas em teste.
 
-## Bloco 1 · Repositórios GitHub
-
-> ✅ **Concluído em 04/09/2026.** Os quatro repositórios estão no ar em `bregaldahq`, públicos,
-> com `main` e `develop`, proteção de branch aplicada (PR obrigatório, 1 aprovação,
-> `enforce_admins`, sem force-push e sem deleção) e o avaliador convidado.
-
-| Repositório | Branches | Convite `soat-architecture` |
-|---|---|---|
-| [oficina-mecanica-tech-challenge](https://github.com/bregaldahq/oficina-mecanica-tech-challenge) | `main`, `develop`, `claude/13soat-fase-3-plan-fbe407` | já é colaborador |
-| [oficina-infra-database](https://github.com/bregaldahq/oficina-infra-database) | `main`, `develop` | convite pendente de aceite |
-| [oficina-infra-k8s](https://github.com/bregaldahq/oficina-infra-k8s) | `main`, `develop` | convite pendente de aceite |
-| [oficina-lambda-auth](https://github.com/bregaldahq/oficina-lambda-auth) | `main`, `develop` | convite pendente de aceite |
-
-**O que ainda falta neste bloco:**
-
-| # | Ação | Esforço | Feito quando |
-|---|---|---|---|
-| 1.5 | Configurar os **secrets** nos 4 repositórios (ver tabela abaixo) | 🟡 | `gh secret list` mostra todos |
-| 1.6 | Criar os **environments** `homologacao` e `producao`, com required reviewer em `producao` | 🟢 | Ambos visíveis em Settings → Environments |
-| 1.7 | Confirmar o **aceite** dos 3 convites pendentes | 🟢 | Aceito — **tire print de cada um para o PDF** |
-| 1.8 | Depois do primeiro pipeline verde, marcar os status checks como obrigatórios na proteção de branch | 🟢 | Checks aparecem como required (só aparecem após rodarem uma vez) |
-
-> ⚠️ **`enforce_admins` está ligado com 1 aprovação obrigatória.** O GitHub não permite aprovar o
-> próprio PR — então **outra pessoa do grupo precisa aprovar** cada PR, inclusive o da Fase 3.
-> Trabalhando sozinho, você fica sem conseguir mergear. Para destravar, desligue `enforce_admins`
-> em Settings → Branches, ou peça a aprovação a um colega.
-
-**Secrets por repositório:**
-
-| Secret | database | k8s | lambda | app |
-|---|:-:|:-:|:-:|:-:|
-| `AWS_ROLE_ARN` | ✓ | ✓ | ✓ | ✓ |
-| `AWS_ACCOUNT_ID` | ✓ | ✓ | ✓ | ✓ |
-| `TF_STATE_BUCKET` | ✓ | ✓ | ✓ | — |
-| `NEW_RELIC_LICENSE_KEY` | — | ✓ | ✓ | ✓ |
-| `NEW_RELIC_ACCOUNT_ID` | ✓ | ✓ | ✓ | ✓ |
-| `NEW_RELIC_API_KEY` | ✓ | ✓ | ✓ | ✓ |
-| `NEW_RELIC_INFRA_ENTITY_GUID` | — | ✓ | — | — |
-| `NEW_RELIC_LAMBDA_ENTITY_GUID` | — | — | ✓ | — |
-
-> Os dois `*_ENTITY_GUID` só podem ser preenchidos **depois do primeiro deploy** — o GUID nasce
-> quando o recurso reporta ao New Relic pela primeira vez. As etapas que os usam são
-> `continue-on-error`, então o deploy passa com eles vazios. Volte e preencha depois, se quiser o
-> marcador de deploy nos gráficos de APM.
+| Camada | Estado (`hml`) |
+|---|---|
+| VPC, RDS MySQL, Secrets Manager, VPC endpoint, 10 parâmetros SSM | ✅ |
+| EKS, node group `t3.medium`, 4 add-ons Helm, ECR, NLB, RBAC | ✅ |
+| API Gateway, VPC Link, Lambda de CPF, Lambda authorizer | ✅ |
+| Aplicação: migrations aplicadas, rollout, smoke test em `/api/ready` | ✅ |
+| Código: 184 testes / 377 asserções, PHPStan nível 8, PSR-12 | ✅ |
+| Ambiente `prod` | ❌ nada provisionado |
 
 ---
 
-## Bloco 2 · Provisionamento AWS
+## Bloco 0 · Contas e bootstrap — ✅ concluído
 
-> **A ordem importa.** Cada repositório lê do SSM o que o anterior publicou.
-> Ordem de `apply`: **database → k8s → lambda → app**. Ordem de `destroy`: **inversa**.
+Tudo feito, com uma pendência que deixou de ser bloqueante:
 
-| # | Ação | Esforço | Feito quando |
-|---|---|---|---|
-| 2.1 | `oficina-infra-database`: apply em `hml` | 🔴 ~15 min de RDS | RDS `available`, 10 parâmetros SSM publicados |
-| 2.2 | `oficina-infra-k8s`: apply em `hml` | 🔴 ~15 min de EKS | `kubectl top nodes` responde (prova que o metrics-server subiu e o HPA vai funcionar) |
-| 2.3 | Confirmar que os Pods do New Relic apareceram no menu Kubernetes | 🟢 | Cluster visível em até 5 min |
-| 2.4 | `oficina-lambda-auth`: **confirmar a versão do layer Bref** e ajustar a variável | 🟢 | Versão conferida em [runtimes.bref.sh](https://runtimes.bref.sh) — está parametrizada, não chute |
-| 2.5 | `oficina-lambda-auth`: apply em `hml` | 🟡 | `apigw/endpoint` publicado no SSM |
-| 2.6 | Aplicação: merge em `develop` e acompanhar o `deploy.yml` | 🟡 | Rollout completo, smoke test em `/api/ready` verde |
-| 2.7 | **Verificar o SG crachá**: `curl` na aplicação tocando o banco, e `POST /auth/cpf` respondendo | 🟢 | Ambos OK — se der **timeout** (não erro de permissão), o `db/client_sg_id` não foi anexado |
-| 2.8 | Repetir 2.1–2.6 para `prod` | 🔴 | Ambiente de produção no ar |
-| 2.9 | Restringir `cluster_endpoint_public_access_cidrs` em `envs/prod.tfvars` (hoje `0.0.0.0/0`) | 🟢 | CIDR limitado ao seu IP |
-| 2.10 | Trocar `capacity_type` para `ON_DEMAND` no ambiente que será avaliado | 🟢 | `envs/prod.tfvars` já está em `ON_DEMAND` — só confirmar |
-
-### Armadilhas conhecidas neste bloco
-
-- **A migration `002` é bloqueante para a aplicação.** O código já espera `customers.status`,
-  `email`, `phone` e a tabela `service_order_status_history`. Antes de a `002` rodar,
-  `INSERT`/`UPDATE` de cliente e a gravação de histórico **falham**. O Job de migration roda no
-  `deploy.yml`, então basta respeitar a ordem — mas se você aplicar a aplicação manualmente,
-  rode a migration primeiro.
-- **`WEBHOOK_TOKEN` virou obrigatório.** Qualquer ambiente sem esse valor no `oficina-secret`
-  passa a responder `401` em `POST /api/service-orders/{id}/approval`. É o comportamento correto
-  (antes o endpoint ficava aberto se a variável estivesse vazia), mas é uma quebra.
-- **`deletion_protection = true` em prod faz o `destroy` falhar de propósito.** Para destruir, é
-  preciso um apply prévio desligando a proteção.
-- **`db_multi_az = false`** nos dois ambientes, por custo. As duas subnets privadas em AZs
-  distintas já existem — ligar em prod é trocar uma linha em `envs/prod.tfvars`.
-- **`max_connections` do `db.t4g.micro`** × 10 réplicas × `pm.max_children` pode estourar
-  justamente no pico da demonstração de HPA. Se acontecer, reduza `pm.max_children` ou suba a
-  classe da instância antes de gravar.
+> **0.7 · Aumento de quota de vCPU** — segue aguardando aprovação da AWS. **Deixou de importar**
+> para o caminho crítico: os nodes passaram de `t3.small` para `t3.medium`, que tem os mesmos
+> 2 vCPU, então o cluster subiu dentro da quota atual. Só volta a pesar se o HPA precisar escalar
+> para 4 nodes durante a gravação.
 
 ---
 
-## Bloco 3 · Observabilidade
+## Bloco 1 · Repositórios GitHub — ✅ concluído
+
+Os quatro repositórios estão públicos, com `main` e `develop` **de conteúdo idêntico**, proteção
+aplicada (PR obrigatório, 1 aprovação, sem force-push, sem deleção) e secrets configurados.
+
+| Repositório | Papel |
+|---|---|
+| [oficina-mecanica-tech-challenge](https://github.com/bregaldahq/oficina-mecanica-tech-challenge) | Aplicação PHP + manifests do workload |
+| [oficina-infra-database](https://github.com/bregaldahq/oficina-infra-database) | VPC, RDS, segredos, migrations |
+| [oficina-infra-k8s](https://github.com/bregaldahq/oficina-infra-k8s) | EKS, add-ons, ECR, NLB |
+| [oficina-lambda-auth](https://github.com/bregaldahq/oficina-lambda-auth) | Lambdas Bref + API Gateway |
+
+**Falta:**
 
 | # | Ação | Esforço | Feito quando |
 |---|---|---|---|
-| 3.1 | Substituir `"accountIds": [0]` nos dois JSONs de dashboard pelo seu account ID | 🟢 | Nenhum `[0]` restante |
-| 3.2 | Importar os dois dashboards (Dashboards → Import dashboard) | 🟢 | Ambos criados **e com dado** em todos os painéis |
-| 3.3 | Criar a política de alertas e as 9 condições de `alertas.json` | 🟡 | 9 condições habilitadas |
-| 3.4 | Criar o monitor Synthetic `oficina-prod-health` apontando para `<apigw-endpoint>/api/health` | 🟢 | `ENABLED` em 2 localidades, com execuções bem-sucedidas |
-| 3.5 | Criar o destino de e-mail e os workflows de notificação | 🟢 | *Send test notification* recebido |
-| 3.6 | Substituir os placeholders `<id da política>` etc. em `politica-notificacao.json` | 🟢 | Arquivo sem `<...>` |
+| 1.1 | Confirmar o **aceite** dos 3 convites de `soat-architecture` | 🟢 depende do avaliador | Aceito — **tire print de cada um para o PDF** |
+| 1.2 | Marcar os status checks como obrigatórios na proteção de branch | 🟢 | Aparecem como *required* (só listáveis após rodarem uma vez) |
 
-**Nomes que os painéis assumem** — já conferi contra o Terraform e o `deploy/`, e batem:
-`appName = 'oficina-api-prod'`, log group `%oficina-prod-api%`, funções `oficina-prod-auth-cpf` e
-`oficina-prod-jwt-authorizer`, `containerName = 'php-fpm'`, `hpaName = 'oficina-api'`. Se você
-mudar `var.environment` ou o prefixo de nomes, **os painéis ficam vazios sem dar erro**.
+> **`enforce_admins` está desligado.** Foi necessário: o GitHub não permite aprovar o próprio PR,
+> e com ele ligado você ficava sem conseguir mergear nada trabalhando sozinho. Push direto
+> continua bloqueado e PR continua obrigatório — a demonstração do vídeo não é afetada.
+
+> **Nunca use `--delete-branch` em PR de sincronização.** Num PR `develop → main` o *head* é uma
+> branch permanente, e a flag manda apagá-la. Aconteceu aqui; só não houve perda porque
+> `allow_deletions: false` recusou a operação.
+
+---
+
+## Bloco 2 · Provisionamento AWS — ✅ `hml` · ❌ `prod`
+
+| # | Ação | Esforço | Feito quando |
+|---|---|---|---|
+| 2.1 | Provisionar `prod` na ordem **database → k8s → lambda → app** | 🔴 ~40 min | Endpoint de produção respondendo |
+| 2.2 | Restringir `cluster_endpoint_public_access_cidrs` em `envs/prod.tfvars` (hoje `0.0.0.0/0`) | 🟢 | CIDR limitado ao seu IP |
+| 2.3 | Confirmar `capacity_type = ON_DEMAND` no ambiente avaliado | 🟢 | Já está assim em `prod.tfvars` |
+
+Cada repositório tem `workflow_dispatch`; o de banco aceita o ambiente como input:
+
+```bash
+gh workflow run Deploy --repo bregaldahq/oficina-infra-database --ref main -f environment=prod
+```
+
+> O `plan (prod)` do repositório de Kubernetes **falha hoje de propósito**: os parâmetros SSM de
+> produção não existem. Passa a verde assim que o stack de banco for aplicado em `prod`.
+
+### Armadilhas confirmadas na prática
+
+Todas estas foram encontradas rodando o pipeline de verdade e já estão corrigidas no código —
+ficam registradas porque voltam a morder em `prod`:
+
+- **`sub` do OIDC do GitHub mudou de formato.** Agora vem `repo:owner@ownerId/repo@repoId:...`
+  com IDs imutáveis. O padrão `repo:owner/nome:*` que todo tutorial ensina **não casa mais**, e o
+  erro é um `AccessDenied` genérico sem pista. Só o CloudTrail revela o `sub` real.
+- **Sem NAT, subnet privada não alcança serviço público da AWS.** A Lambda ficava pendurada até o
+  timeout de 15s chamando o Secrets Manager. Resolvido com interface VPC endpoint (~US$ 7,20/mês
+  por AZ) e regra de egress 443 no SG crachá — que, por definir egress explícito, negava tudo mais.
+- **Autorização do EKS é separada da de IAM.** A role da aplicação com `AdministratorAccess` ainda
+  recebia `Unauthorized` do kubectl até ganhar uma *access entry*, e os CRDs
+  (`TargetGroupBinding`, `ExternalSecret`) exigiram RBAC próprio além dela.
+- **Limite de pods por node vem do VPC CNI, não de CPU.** `t3.small` suporta 11 pods e os add-ons
+  consumiam os 22 slots dos dois nodes.
+- **`cp -a` falha em container não-root.** Consequência da migração de Alpine (uid 82) para Debian
+  (uid 33): o initContainer não consegue preservar atributos no `emptyDir`, e o pod fica preso em
+  `PodInitializing`.
+- **Performance Insights não existe em classes micro.** `db.t4g.micro` recusa `CreateDBInstance`.
+- **`WEBHOOK_TOKEN` virou obrigatório.** Ambiente sem esse valor responde `401` em
+  `POST /api/service-orders/{id}/approval`.
+- **`deletion_protection = true` em `prod`** faz o `destroy` falhar por projeto.
+
+---
+
+## Bloco 3 · Observabilidade — ❌ próximo passo
+
+| # | Ação | Esforço | Feito quando |
+|---|---|---|---|
+| 3.1 | Rodar `scripts/newrelic-import.py` com as chaves em mãos | 🟢 | Dashboards e alertas criados |
+| 3.2 | Conferir que os painéis têm **dado**, não só estrutura | 🟢 | Gráficos populados |
+| 3.3 | Criar o monitor Synthetic apontando para `<endpoint>/api/health` | 🟢 | `ENABLED` em 2 localidades |
+| 3.4 | Criar destino de e-mail e workflow de notificação | 🟢 | *Send test notification* recebido |
+
+> ⚠️ **Os dashboards consultam o ambiente `prod`.** As NRQL filtram por
+> `appName = 'oficina-api-prod'` e log group `%oficina-prod-api%`. Como só existe `hml`, eles
+> ficariam **vazios sem dar erro**. O script de importação aceita o ambiente como parâmetro e
+> reescreve as consultas — importe com `hml` enquanto produção não existir.
 
 ---
 
@@ -139,36 +140,50 @@ mudar `var.environment` ou o prefixo de nomes, **os painéis ficam vazios sem da
 
 | # | Ação | Esforço | Feito quando |
 |---|---|---|---|
-| 4.1 | Popular o banco de homologação com o seed `003_seed_demo.sql` (120 OS em 30 dias, 7 status) | 🟢 | Dashboards com dado — **dashboard vazio arruína a demonstração** |
-| 4.2 | Subir produção **24–48h antes** da gravação e deixar no ar até a nota sair | 🔴 | Endpoint respondendo (o enunciado pede "links para os deploys ativos") |
-| 4.3 | Ensaiar o vídeo cronometrado ao menos uma vez, com plano B da demo de HPA gravado | 🟡 | Ensaio feito, gravação de reserva disponível |
-| 4.4 | Gravar seguindo `docs/fase-3/ROTEIRO-VIDEO.md` | 🔴 | Vídeo ≤ 15:00, **sem segredo visível em tela**, áudio audível |
-| 4.5 | Publicar no YouTube como **não listado** | 🟢 | Link em mãos |
-| 4.6 | Preencher o link do vídeo no `README.md` (seção Entregáveis) | 🟢 | Sem `_adicionar link_` |
-| 4.7 | Montar o PDF único: links dos 4 repos, link do vídeo, links das documentações, confirmação do `soat-architecture` | 🟡 | PDF submetido no Portal do Aluno |
+| 4.1 | Subir produção **24–48h antes** da gravação e manter no ar até sair a nota | 🔴 | Endpoint respondendo (o enunciado pede "links para os deploys ativos") |
+| 4.2 | Ensaiar o vídeo cronometrado, com plano B da demo de HPA gravado | 🟡 | Ensaio feito |
+| 4.3 | Gravar seguindo `docs/fase-3/ROTEIRO-VIDEO.md` | 🔴 | ≤ 15:00, **sem segredo em tela** |
+| 4.4 | Publicar no YouTube como **não listado** | 🟢 | Link em mãos |
+| 4.5 | Preencher o link do vídeo no `README.md` | 🟢 | Sem `_adicionar link_` |
+| 4.6 | Montar o PDF: links dos 4 repos, vídeo, documentações, confirmação do avaliador | 🟡 | Submetido no Portal do Aluno |
+
+O seed já populou **120 ordens de serviço distribuídas em 30 dias e nos 7 status**, com histórico
+de transições coerente — os dashboards de negócio têm dado real para mostrar.
 
 ---
 
-## Contenção de custo
+## Custo
 
-Com tudo ligado 24/7 são **~US$ 139/mês**. Com o EKS destruído fora das sessões de trabalho, cai
-para **~US$ 25/mês**. É exatamente por isso que a VPC e o RDS vivem no repositório de banco e não
-no de Kubernetes: você pode rodar `terraform destroy` no repo de K8s ao fim de cada sessão sem
-tocar em nada stateful. Recriar o cluster leva ~12 minutos.
+| Recurso | Mês |
+|---|---|
+| EKS control plane | ~US$ 73 |
+| 2× t3.medium SPOT (`hml`) | ~US$ 18 |
+| NLB interno | ~US$ 17 |
+| VPC endpoint Secrets Manager (1 AZ) | ~US$ 7 |
+| RDS `db.t4g.micro` | grátis nos 12 primeiros meses |
+| API Gateway, Lambda, ECR, Secrets Manager | ~US$ 3 |
+| **Total ligado 24/7** | **~US$ 118** |
+| **Com o EKS destruído fora das sessões** | **~US$ 30** |
 
-Não esqueça o Budget do item 0.2 antes do primeiro apply.
+O `terraform destroy` do repositório de Kubernetes não toca em nada stateful — foi por isso que a
+VPC, o RDS e os segredos ficaram no repositório de banco. Recriar o cluster leva ~12 minutos.
 
 ---
 
-## Duas decisões que ficaram em aberto
+## Decisões em aberto
 
-Nenhuma bloqueia a entrega; ambas são melhorias que registro para você decidir.
+Nenhuma bloqueia a entrega.
 
-1. **Nome do repositório `oficina-infra-database`.** Ele possui bem mais que o banco: a VPC, as
-   subnets, os security groups e os segredos de autenticação. Um nome como `oficina-infra-core`
-   descreveria melhor. Registrado na ADR-009 como candidato a rename — não renomeei porque o
-   enunciado nomeia os quatro repositórios pelo conteúdo esperado.
-2. **`parts_inventory.version`** existe no schema para lock otimista, mas a aplicação ainda não o
+1. **Extensão New Relic da Lambda desligada.** A versão 81 do layer público não é acessível a esta
+   conta (`AccessDenied` em `lambda:GetLayerVersion`). O APM da aplicação e o monitoramento do
+   cluster seguem ativos; só as métricas nativas das funções ficam de fora. Para reativar,
+   confirme a versão vigente em https://layers.newrelic-external.com/ e ligue `newrelic_enabled`.
+2. **Nome do repositório `oficina-infra-database`.** Ele possui bem mais que o banco — VPC,
+   subnets, security groups e os segredos de autenticação. `oficina-infra-core` descreveria
+   melhor. Registrado na ADR-009 como candidato a rename.
+3. **`parts_inventory.version`** existe no schema para lock otimista, mas a aplicação ainda não o
    usa. Com o HPA subindo até 10 Pods, duas OS concorrentes podem reservar a mesma peça. O
-   `CHECK (stock_quantity >= 0)` segura a corrupção de dado, mas a última escrita ainda vence.
-   Implementar o lock otimista é trabalho de aplicação, fora do escopo desta fase.
+   `CHECK (stock_quantity >= 0)` impede corrupção, mas a última escrita vence.
+4. **Migrations aplicadas pelo repositório da aplicação.** A ordem contratada é
+   database → k8s → lambda → app, mas o *schema* só nasce no último passo — então o smoke test da
+   Lambda não pode passar num ambiente recém-criado. Funciona; a ordem é que fica menos honesta.
