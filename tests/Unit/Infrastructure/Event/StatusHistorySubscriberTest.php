@@ -61,7 +61,7 @@ class StatusHistorySubscriberTest extends TestCase
     {
         $this->repository = new FakeStatusHistoryRepository();
 
-        $this->uuid = new class implements UuidGeneratorInterface {
+        $this->uuid = new class () implements UuidGeneratorInterface {
             public function generate(): string
             {
                 return 'hist-uuid';
