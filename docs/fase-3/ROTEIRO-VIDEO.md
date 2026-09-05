@@ -10,20 +10,41 @@ explicando por que há duas réplicas no mínimo vale a nota.
 
 ---
 
+> **A gravação é em homologação.** O ambiente `prod` não foi provisionado, por decisão de custo:
+> cada cluster EKS tem control plane próprio a ~US$ 73/mês, e um segundo ambiente completo
+> praticamente dobraria a conta do projeto.
+>
+> O enunciado pede deploy automático das branches de homologação **e** de produção. Isso está
+> **implementado e visível** nos quatro repositórios — `push` em `develop` implanta em
+> homologação, `push` em `main` implanta em produção, com GitHub Environments distintos. O que
+> não existe é a infraestrutura de produção provisionada.
+>
+> **Diga isso em voz alta no vídeo, no Bloco 4**, uma frase, sem rodeio: *"o pipeline de produção
+> está implementado e é o mesmo; não deixei o ambiente de pé porque um segundo control plane de
+> EKS dobraria o custo do projeto."* Ser direto sobre um trade-off consciente vale mais do que
+> torcer para ninguém reparar — e reparam.
+
 ## Preparação prévia — checklist
 
 Faça tudo isto **antes** de apertar o gravar. Nada aqui deve acontecer ao vivo.
 
 ### Ambiente
 
-- [ ] Os quatro repositórios aplicados e funcionando em `prod`, na ordem
+- [ ] Os quatro repositórios aplicados e funcionando em **`hml`**, na ordem
       **database → k8s → lambda → app**.
 - [ ] `terraform apply` de todos os stacks concluído **sem erro** e sem `plan` pendente.
 - [ ] Migrations aplicadas; `hml` com o `003_seed_demo.sql` (30 dias de OS sintéticas) — é ele que
       faz os dashboards de negócio terem forma em vez de uma linha reta.
-- [ ] `curl <endpoint>/api/health` respondendo 200.
-- [ ] Pelo menos um cliente `ACTIVE` com CPF conhecido, um `BLOCKED` e um CPF **não cadastrado**
-      anotados — os três ramos de erro que você vai demonstrar.
+- [ ] `curl https://lkdvezfrm5.execute-api.us-east-1.amazonaws.com/api/health` respondendo 200.
+- [ ] CPFs do seed anotados e testados — são os quatro ramos que você vai demonstrar:
+
+      | CPF | Cliente | Resposta |
+      |---|---|---|
+      | `78901428385` | Ana Paula Ribeiro, `ACTIVE` | 200 com token |
+      | `94064914198` | Isabela, `INACTIVE` | 403 |
+      | `02407397878` | Joao Vitor, `BLOCKED` | 403 |
+      | `52998224725` | não cadastrado (DV válido) | 404 |
+      | `12345678900` | DV inválido | 400 |
 - [ ] Dashboards do New Relic importados **e com dado** (importe cedo, não na véspera).
 - [ ] Alertas criados e notificação testada.
 - [ ] Monitor Synthetic rodando há tempo suficiente para ter histórico.
@@ -107,7 +128,7 @@ Percorra o diagrama seguindo o caminho de uma requisição — e não componente
 **Comando ao vivo — este é o momento mais forte do bloco:**
 
 ```bash
-aws ssm get-parameters-by-path --path /oficina/prod --recursive \
+aws ssm get-parameters-by-path --path /oficina/hml --recursive \
   --query 'Parameters[].Name' --output table
 ```
 
@@ -179,7 +200,7 @@ em header injetado pelo gateway."*
 **Na tela:** terminal dividido — `kubectl get hpa -w` de um lado, `kubectl get pods -w` do outro.
 
 ```bash
-kubectl -n oficina-prod get hpa oficina-api -w
+kubectl -n oficina-hml get hpa oficina-api -w
 hey -z 90s -c 60 https://<endpoint>/api/service-orders/me -H "Authorization: Bearer $TOKEN"
 ```
 
