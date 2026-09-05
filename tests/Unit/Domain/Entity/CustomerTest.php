@@ -5,8 +5,8 @@ declare(strict_types=1);
 namespace Tests\Unit\Domain\Entity;
 
 use App\Domain\Entity\Customer;
-use App\Domain\Exception\InvalidDocumentException;
 use App\Domain\Exception\DomainException;
+use App\Domain\Exception\InvalidDocumentException;
 use App\Domain\ValueObject\CustomerStatus;
 use App\Domain\ValueObject\Document;
 use PHPUnit\Framework\TestCase;
