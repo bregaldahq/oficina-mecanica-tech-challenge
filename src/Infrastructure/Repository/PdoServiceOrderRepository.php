@@ -11,6 +11,7 @@ use App\Domain\Entity\ServiceItem;
 use App\Domain\Entity\Vehicle;
 use App\Domain\Repository\ServiceOrderRepositoryInterface;
 use App\Domain\UuidGeneratorInterface;
+use App\Domain\ValueObject\CustomerStatus;
 use App\Domain\ValueObject\Document;
 use App\Domain\ValueObject\LicensePlate;
 use App\Infrastructure\Database\PdoConnection;
@@ -30,6 +31,7 @@ class PdoServiceOrderRepository implements ServiceOrderRepositoryInterface
         $stmt = $this->pdo->prepare(
             'SELECT so.*,
                     c.name AS c_name, c.document AS c_document,
+                    c.status AS c_status, c.email AS c_email, c.phone AS c_phone,
                     v.customer_id AS v_customer_id, v.license_plate AS v_plate,
                     v.brand AS v_brand, v.model AS v_model, v.year AS v_year
              FROM service_orders so
@@ -52,6 +54,7 @@ class PdoServiceOrderRepository implements ServiceOrderRepositoryInterface
         $stmt = $this->pdo->query(
             'SELECT so.*,
                     c.name AS c_name, c.document AS c_document,
+                    c.status AS c_status, c.email AS c_email, c.phone AS c_phone,
                     v.customer_id AS v_customer_id, v.license_plate AS v_plate,
                     v.brand AS v_brand, v.model AS v_model, v.year AS v_year
              FROM service_orders so
@@ -68,6 +71,7 @@ class PdoServiceOrderRepository implements ServiceOrderRepositoryInterface
         $stmt = $this->pdo->query(
             "SELECT so.*,
                     c.name AS c_name, c.document AS c_document,
+                    c.status AS c_status, c.email AS c_email, c.phone AS c_phone,
                     v.customer_id AS v_customer_id, v.license_plate AS v_plate,
                     v.brand AS v_brand, v.model AS v_model, v.year AS v_year
              FROM service_orders so
@@ -87,10 +91,30 @@ class PdoServiceOrderRepository implements ServiceOrderRepositoryInterface
         return array_map(fn (array $row) => $this->hydrateWithItems($row), $stmt->fetchAll());
     }
 
+    public function findByCustomerId(string $customerId): array
+    {
+        $stmt = $this->pdo->prepare(
+            'SELECT so.*,
+                    c.name AS c_name, c.document AS c_document,
+                    c.status AS c_status, c.email AS c_email, c.phone AS c_phone,
+                    v.customer_id AS v_customer_id, v.license_plate AS v_plate,
+                    v.brand AS v_brand, v.model AS v_model, v.year AS v_year
+             FROM service_orders so
+             JOIN customers c ON c.id = so.customer_id
+             JOIN vehicles  v ON v.id = so.vehicle_id
+             WHERE so.customer_id = :customer_id
+             ORDER BY so.created_at DESC'
+        );
+        $stmt->execute([':customer_id' => $customerId]);
+
+        return array_map(fn (array $row) => $this->hydrateWithItems($row), $stmt->fetchAll());
+    }
+
     public function findByDocumentAndLicensePlate(string $document, string $licensePlate, ?string $status = null): array
     {
         $sql = 'SELECT so.*,
                        c.name AS c_name, c.document AS c_document,
+                    c.status AS c_status, c.email AS c_email, c.phone AS c_phone,
                        v.customer_id AS v_customer_id, v.license_plate AS v_plate,
                        v.brand AS v_brand, v.model AS v_model, v.year AS v_year
                 FROM service_orders so
@@ -219,6 +243,9 @@ class PdoServiceOrderRepository implements ServiceOrderRepositoryInterface
             id: $row['customer_id'],
             name: $row['c_name'],
             document: new Document($row['c_document']),
+            status: CustomerStatus::fromString(isset($row['c_status']) ? (string)$row['c_status'] : null),
+            email: isset($row['c_email']) ? (string)$row['c_email'] : null,
+            phone: isset($row['c_phone']) ? (string)$row['c_phone'] : null,
         );
 
         $vehicle = Vehicle::create(
