@@ -77,22 +77,30 @@ aplicada (PR obrigatório, 1 aprovação, sem force-push, sem deleção) e secre
 
 ---
 
-## Bloco 2 · Provisionamento AWS — ✅ `hml` · ❌ `prod`
+## Bloco 2 · Provisionamento AWS — ✅ `hml` · `prod` não será provisionado
 
-| # | Ação | Esforço | Feito quando |
-|---|---|---|---|
-| 2.1 | Provisionar `prod` na ordem **database → k8s → lambda → app** | 🔴 ~40 min | Endpoint de produção respondendo |
-| 2.2 | Restringir `cluster_endpoint_public_access_cidrs` em `envs/prod.tfvars` (hoje `0.0.0.0/0`) | 🟢 | CIDR limitado ao seu IP |
-| 2.3 | Confirmar `capacity_type = ON_DEMAND` no ambiente avaliado | 🟢 | Já está assim em `prod.tfvars` |
+**Decisão registrada:** `prod` não será provisionado. Cada cluster EKS tem control plane próprio
+a ~US$ 73/mês, e um segundo ambiente completo praticamente dobraria o custo do projeto.
 
-Cada repositório tem `workflow_dispatch`; o de banco aceita o ambiente como input:
+O que isso significa na prática:
+
+- O **pipeline** de produção está implementado nos quatro repositórios — `push` em `develop`
+  implanta em homologação, `push` em `main` implanta em produção, com GitHub Environments
+  distintos. O enunciado pede deploy automático das duas branches, e isso existe e é demonstrável.
+- O que não existe é a **infraestrutura** de produção de pé.
+- O `plan (prod)` do repositório de Kubernetes passou a ser **pulado com `::notice::`** quando os
+  parâmetros SSM do ambiente não existem, em vez de falhar. Check vermelho permanente ensina o
+  time a ignorar check vermelho.
+
+Se em algum momento você quiser subir `prod`, a ordem é **database → k8s → lambda → app** e cada
+repositório aceita disparo manual:
 
 ```bash
 gh workflow run Deploy --repo bregaldahq/oficina-infra-database --ref main -f environment=prod
 ```
 
-> O `plan (prod)` do repositório de Kubernetes **falha hoje de propósito**: os parâmetros SSM de
-> produção não existem. Passa a verde assim que o stack de banco for aplicado em `prod`.
+Antes disso, restrinja `cluster_endpoint_public_access_cidrs` em `envs/prod.tfvars`, que hoje está
+em `0.0.0.0/0`.
 
 ### Armadilhas confirmadas na prática
 
@@ -120,19 +128,28 @@ ficam registradas porque voltam a morder em `prod`:
 
 ---
 
-## Bloco 3 · Observabilidade — ❌ próximo passo
+## Bloco 3 · Observabilidade — ✅ concluído
 
-| # | Ação | Esforço | Feito quando |
-|---|---|---|---|
-| 3.1 | Rodar `scripts/newrelic-import.py` com as chaves em mãos | 🟢 | Dashboards e alertas criados |
-| 3.2 | Conferir que os painéis têm **dado**, não só estrutura | 🟢 | Gráficos populados |
-| 3.3 | Criar o monitor Synthetic apontando para `<endpoint>/api/health` | 🟢 | `ENABLED` em 2 localidades |
-| 3.4 | Criar destino de e-mail e workflow de notificação | 🟢 | *Send test notification* recebido |
+Importado na conta **8475782**, ambiente `hml`, via `scripts/newrelic-import.py`:
 
-> ⚠️ **Os dashboards consultam o ambiente `prod`.** As NRQL filtram por
-> `appName = 'oficina-api-prod'` e log group `%oficina-prod-api%`. Como só existe `hml`, eles
-> ficariam **vazios sem dar erro**. O script de importação aceita o ambiente como parâmetro e
-> reescreve as consultas — importe com `hml` enquanto produção não existir.
+| Artefato | Identificador |
+|---|---|
+| Dashboard *Negócio* — 14 painéis | `da:13134308` |
+| Dashboard *Plataforma* — 23 painéis em 3 páginas | `da:13134309` |
+| Política de alertas + 9 condições | id `8007663` |
+| Monitor Synthetic `oficina-hml-health` | 2 localidades |
+
+**Falta:** confirmar no painel que os gráficos têm **dado**, não só estrutura. Os de negócio devem
+estar cheios — o seed populou 120 ordens em 30 dias. Os de latência e erro podem estar magros,
+porque a aplicação subiu há pouco. Dashboard vazio na gravação é o pior cenário.
+
+Os secrets `NEW_RELIC_INFRA_ENTITY_GUID` e `NEW_RELIC_LAMBDA_ENTITY_GUID` seguem vazios: eles
+querem o GUID das entidades **monitoradas** (cluster e funções), que nascem quando o agente
+reporta. Rode o script de novo — ele agora lista essas entidades ao final. As etapas que os usam
+são `continue-on-error`, então nada quebra enquanto isso.
+
+> Os JSONs versionados continuam escritos para `prod`. É o script que reescreve as 47 referências
+> de ambiente na hora da importação — não edite os arquivos à mão.
 
 ---
 
@@ -140,7 +157,7 @@ ficam registradas porque voltam a morder em `prod`:
 
 | # | Ação | Esforço | Feito quando |
 |---|---|---|---|
-| 4.1 | Subir produção **24–48h antes** da gravação e manter no ar até sair a nota | 🔴 | Endpoint respondendo (o enunciado pede "links para os deploys ativos") |
+| 4.1 | Manter **homologação** no ar até sair a nota — é o deploy ativo da entrega | 🟢 | `https://lkdvezfrm5.execute-api.us-east-1.amazonaws.com/api/health` responde 200 |
 | 4.2 | Ensaiar o vídeo cronometrado, com plano B da demo de HPA gravado | 🟡 | Ensaio feito |
 | 4.3 | Gravar seguindo `docs/fase-3/ROTEIRO-VIDEO.md` | 🔴 | ≤ 15:00, **sem segredo em tela** |
 | 4.4 | Publicar no YouTube como **não listado** | 🟢 | Link em mãos |
