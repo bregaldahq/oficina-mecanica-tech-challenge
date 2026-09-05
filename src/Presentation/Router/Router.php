@@ -125,8 +125,8 @@ class Router
     }
 
     /**
-     * @param array<string, mixed>  $claims
-     * @param array<int, string>    $roles
+     * @param array<string, mixed> $claims
+     * @param array<int, string>   $roles
      */
     private function hasRole(array $claims, array $roles): bool
     {
