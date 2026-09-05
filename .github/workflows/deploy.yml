@@ -106,6 +106,10 @@ jobs:
           # Contratos): o NLB e o TG são do repo oficina-infra-k8s.
           sed -i "s#TARGET_GROUP_ARN_PLACEHOLDER#${{ steps.ssm.outputs.target_group_arn }}#" \
             deploy/base/targetgroupbinding.yaml
+          # O Job de migration e aplicado fora do kustomize (Jobs sao imutaveis, um
+          # apply -k repetido falharia), entao a imagem precisa ser fixada aqui tambem.
+          sed -i "s#APP_IMAGE_PLACEHOLDER#${{ steps.ssm.outputs.ecr_url }}:${{ github.sha }}#" \
+            deploy/base/migration-job.yaml
           # Ref das migrations: por padrão a mesma do branch em deploy.
           MIG_REF="${{ inputs.migrations_ref }}"
           if [ -z "$MIG_REF" ]; then
@@ -131,7 +135,21 @@ jobs:
           kubectl -n "$NS" apply -f deploy/base/migration-job.yaml
           if ! kubectl -n "$NS" wait --for=condition=complete job/oficina-migrate --timeout=600s; then
             echo "::error::Job de migration falhou"
-            kubectl -n "$NS" logs job/oficina-migrate --all-containers --tail=200 || true
+            # `logs job/...` nao devolve nada enquanto os initContainers nao terminam,
+            # que e justamente o caso mais comum de travamento. Sem describe e sem
+            # eventos, a falha chega aqui sem uma linha de diagnostico.
+            echo "--- job ---";    kubectl -n "$NS" describe job oficina-migrate || true
+            echo "--- pods ---";   kubectl -n "$NS" get pods -l job-name=oficina-migrate -o wide || true
+            echo "--- describe ---"
+            kubectl -n "$NS" describe pods -l job-name=oficina-migrate || true
+            echo "--- eventos ---"
+            kubectl -n "$NS" get events --sort-by=.lastTimestamp --field-selector involvedObject.kind=Pod | tail -30 || true
+            echo "--- logs por container ---"
+            for c in $(kubectl -n "$NS" get pods -l job-name=oficina-migrate \
+                        -o jsonpath='{.items[0].spec.initContainers[*].name} {.items[0].spec.containers[*].name}' 2>/dev/null); do
+              echo "== container $c"
+              kubectl -n "$NS" logs job/oficina-migrate -c "$c" --tail=100 || true
+            done
             exit 1
           fi
           kubectl -n "$NS" logs job/oficina-migrate --all-containers --tail=100

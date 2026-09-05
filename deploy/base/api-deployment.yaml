@@ -34,7 +34,12 @@ spec:
       initContainers:
         - name: copy-app
           image: oficina-api
-          command: ["sh", "-c", "cp -a /var/www/html/. /app-code/"]
+          # cp -R, nao cp -a: o -a preserva timestamps e dono, e o container roda
+          # como www-data (uid 33). O diretorio raiz do emptyDir pertence ao root,
+          # entao o utime falha com "Operation not permitted", o initContainer nunca
+          # termina e o pod fica preso em PodInitializing. O conteudo copiado so
+          # precisa ser legivel pelo php-fpm e pelo nginx.
+          command: ["sh", "-c", "cp -R /var/www/html/. /app-code/"]
           volumeMounts:
             - name: app-code
               mountPath: /app-code

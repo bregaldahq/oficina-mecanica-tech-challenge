@@ -9,10 +9,6 @@ resources:
   - pdb.yaml
 
 patches:
-  - path: namespace.yaml
-    target:
-      kind: Namespace
-      name: oficina
   - path: deployment-patch.yaml
   - path: hpa-patch.yaml
   - path: external-secret-patch.yaml
