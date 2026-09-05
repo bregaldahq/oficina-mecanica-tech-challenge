@@ -8,3 +8,6 @@ coverage-report/
 # (ver docs/fase-3/PENDENCIAS.md). Mantê-los rastreados aqui criaria duas fontes
 # da verdade para o mesmo código.
 repos/
+
+# Configuração local de ferramentas, não faz parte do projeto
+.claude/
