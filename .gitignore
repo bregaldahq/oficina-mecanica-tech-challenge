@@ -5,7 +5,7 @@ coverage-report/
 *.log
 
 # Os repositórios de infraestrutura viraram repositórios Git independentes
-# (ver docs/fase-3/PENDENCIAS.md). Mantê-los rastreados aqui criaria duas fontes
+# (ver notas-internas/PENDENCIAS.md). Mantê-los rastreados aqui criaria duas fontes
 # da verdade para o mesmo código.
 repos/
 
@@ -13,3 +13,7 @@ repos/
 .claude/
 
 __pycache__/
+
+# Anotações de processo: backlog, pendências, roteiro de gravação e relatórios de
+# execução. São material de trabalho, não entregável — ficam só na máquina.
+notas-internas/

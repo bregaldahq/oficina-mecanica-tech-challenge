@@ -169,7 +169,6 @@ nunca confia em header injetado pelo gateway.
 | **[ADRs](docs/fase-3/adr/)** | 10 decisões arquiteturais, com consequências negativas assumidas e alternativas descartadas |
 | **[RFCs](docs/fase-3/rfc/)** | escolha da nuvem · banco gerenciado · estratégia de autenticação |
 | **[Contratos](docs/fase-3/CONTRATOS.md)** | documento normativo entre os quatro repositórios |
-| **[Roteiro do vídeo](docs/fase-3/ROTEIRO-VIDEO.md)** | roteiro minutado de 15 minutos |
 
 ---
 
@@ -566,7 +565,7 @@ também uma **coleção Postman** com ambientes prontos em
 | Diagramas | [`docs/fase-3/diagramas/`](docs/fase-3/diagramas/) |
 | Observabilidade | [dashboards e alertas New Relic](docs/fase-3/newrelic/) |
 | Contratos entre repositórios | [`docs/fase-3/CONTRATOS.md`](docs/fase-3/CONTRATOS.md) |
-| Vídeo demonstrativo (≤ 15 min) | _adicionar link_ — [roteiro minutado](docs/fase-3/ROTEIRO-VIDEO.md) |
+| Vídeo demonstrativo (≤ 15 min) | _adicionar link_ |
 
 ---
 
