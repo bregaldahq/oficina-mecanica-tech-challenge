@@ -58,6 +58,20 @@ def nerdgraph(query: str, variables: dict, api_key: str) -> dict:
     return body["data"]
 
 
+Q_ENTIDADES = """
+query($busca: String!) {
+  actor { entitySearch(query: $busca) { results { entities { guid name domain entityType } } } }
+}
+"""
+
+
+def buscar_entidades(env: str, api_key: str, region: str) -> list[dict]:
+    """Entidades que o agente já reportou — cluster EKS e funções Lambda."""
+    busca = f"name LIKE 'oficina-{env}%' OR name = 'oficina-api-{env}'"
+    data = nerdgraph(Q_ENTIDADES, {"busca": busca}, api_key, region)
+    return data["actor"]["entitySearch"]["results"]["entities"]
+
+
 # ------------------------------------------------------------------- substituição
 
 
@@ -241,11 +255,22 @@ def main() -> None:
         print("\nSynthetic:")
         create_synthetic(args.env, acct_i, args.endpoint, key, args.dry_run)
 
-    print(
-        "\n==> Concluído.\n"
-        "Os GUIDs acima alimentam os secrets NEW_RELIC_INFRA_ENTITY_GUID (repo de k8s)\n"
-        "e NEW_RELIC_LAMBDA_ENTITY_GUID (repo da lambda), usados pelo marcador de deploy."
-    )
+    print("\n==> Concluído.")
+
+    # Os GUIDs impressos acima são dos artefatos que ESTE script cria (dashboards e
+    # monitor). Os secrets do marcador de deploy querem outra coisa: as entidades
+    # MONITORADAS — o cluster e as funções — que nascem quando o agente reporta.
+    if not args.dry_run:
+        print("\nEntidades monitoradas (para os secrets do marcador de deploy):")
+        try:
+            achadas = buscar_entidades(args.env, key, args.region)
+        except SystemExit:
+            achadas = []
+        if achadas:
+            for e in achadas:
+                print(f"  {e['domain']:6} {e['name']:44} {e['guid']}")
+        else:
+            print("  nenhuma ainda — o agente precisa reportar primeiro. Rode de novo mais tarde.")
 
 
 if __name__ == "__main__":
