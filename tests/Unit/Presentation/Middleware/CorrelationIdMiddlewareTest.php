@@ -14,7 +14,7 @@ class CorrelationIdMiddlewareTest extends TestCase
 
     protected function setUp(): void
     {
-        $uuid = new class implements UuidGeneratorInterface {
+        $uuid = new class () implements UuidGeneratorInterface {
             public function generate(): string
             {
                 return 'generated-uuid';
