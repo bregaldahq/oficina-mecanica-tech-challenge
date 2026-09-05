@@ -11,3 +11,5 @@ repos/
 
 # Configuração local de ferramentas, não faz parte do projeto
 .claude/
+
+__pycache__/
