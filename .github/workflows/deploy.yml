@@ -200,6 +200,24 @@ jobs:
           curl -fsS http://127.0.0.1:18080/api/health > /dev/null
 
       # ── New Relic ─────────────────────────────────────────────────────────
+      # Converte "telemetria ausente" em falha de pipeline. Sem isto, o deploy fica
+      # verde com o agente mudo, e a descoberta acontece dias depois, olhando um
+      # grafico vazio.
+      - name: Smoke de observabilidade
+        if: success()
+        env:
+          NEW_RELIC_API_KEY: ${{ secrets.NEW_RELIC_API_KEY }}
+          NEW_RELIC_ACCOUNT_ID: ${{ secrets.NEW_RELIC_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          # Gera trafego para haver o que reportar.
+          API=$(aws ssm get-parameter --name "/oficina/${ENVIRONMENT}/apigw/endpoint" \
+                  --query 'Parameter.Value' --output text 2>/dev/null || echo "")
+          if [ -n "$API" ]; then
+            for _ in 1 2 3 4 5; do curl -fsS "$API/api/health" >/dev/null || true; done
+          fi
+          python3 scripts/smoke-observabilidade.py --env "$ENVIRONMENT" --timeout 300
+
       - name: Marcar deployment no New Relic
         if: success()
         env:
