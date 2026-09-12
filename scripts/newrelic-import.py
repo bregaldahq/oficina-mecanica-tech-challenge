@@ -100,6 +100,15 @@ def buscar_entidades(env: str, api_key: str, region: str) -> list[dict]:
 # ------------------------------------------------------------------- substituição
 
 
+# O projeto carrega DUAS nomenclaturas de ambiente, e elas nao coincidem:
+#   - infraestrutura (Terraform, SSM, nomes de recurso): hml / prod
+#   - runtime da aplicacao (APP_ENV, definido pelo overlay):  homologacao / producao
+#
+# O atributo `env` dos custom events vem do APP_ENV. Filtrar por 'hml' nas NRQL
+# devolve zero, mesmo com os eventos chegando — o painel fica vazio sem erro.
+APP_ENV = {"hml": "homologacao", "prod": "producao"}
+
+
 def retarget(obj, env: str, account_id: int, endpoint: str):
     """Reescreve ambiente e account id recursivamente."""
     if isinstance(obj, dict):
@@ -115,8 +124,8 @@ def retarget(obj, env: str, account_id: int, endpoint: str):
         s = s.replace("oficina-api-prod", f"oficina-api-{env}")
         # recursos AWS: oficina-prod-api, oficina-prod-auth-cpf, ...
         s = re.sub(r"oficina-prod-", f"oficina-{env}-", s)
-        # atributo dos custom events e dos logs
-        s = re.sub(r"env\s*=\s*'prod'", f"env = '{env}'", s)
+        # atributo dos custom events e dos logs: usa o valor de APP_ENV, nao o da infra
+        s = re.sub(r"env\s*=\s*'prod'", f"env = '{APP_ENV.get(env, env)}'", s)
         # clusterName / nomes soltos
         s = s.replace("oficina-prod", f"oficina-{env}")
         # nome da política e títulos: "Oficina Mecânica · prod"
