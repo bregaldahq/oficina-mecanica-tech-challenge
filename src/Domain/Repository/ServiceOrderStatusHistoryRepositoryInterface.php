@@ -27,4 +27,10 @@ interface ServiceOrderStatusHistoryRepositoryInterface
      * so subscriber registration order does not change the result.
      */
     public function findLastChangedAtBefore(string $serviceOrderId, \DateTimeImmutable $before): ?\DateTimeImmutable;
+
+    /**
+     * Instant of the first transition ever recorded for the order — its entry into RECEIVED,
+     * i.e. when it was opened. Null when the order has no history.
+     */
+    public function findFirstChangedAt(string $serviceOrderId): ?\DateTimeImmutable;
 }

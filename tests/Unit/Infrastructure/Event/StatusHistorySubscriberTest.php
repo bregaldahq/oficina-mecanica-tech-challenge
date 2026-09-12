@@ -48,6 +48,11 @@ final class FakeStatusHistoryRepository implements ServiceOrderStatusHistoryRepo
     {
         return null;
     }
+
+    public function findFirstChangedAt(string $serviceOrderId): ?\DateTimeImmutable
+    {
+        return null;
+    }
 }
 
 /** Writes to service_order_status_history (CONTRATOS.md §6, ajuste 3). */

@@ -69,4 +69,22 @@ class PdoServiceOrderStatusHistoryRepository implements ServiceOrderStatusHistor
 
         return $changedAt;
     }
+
+    public function findFirstChangedAt(string $serviceOrderId): ?\DateTimeImmutable
+    {
+        $stmt = $this->pdo->prepare(
+            'SELECT MIN(changed_at) AS changed_at
+               FROM service_order_status_history
+              WHERE service_order_id = :service_order_id'
+        );
+        $stmt->execute([':service_order_id' => $serviceOrderId]);
+
+        $row = $stmt->fetch();
+
+        if (!is_array($row) || !isset($row['changed_at'])) {
+            return null;
+        }
+
+        return new \DateTimeImmutable((string)$row['changed_at']);
+    }
 }

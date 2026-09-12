@@ -294,7 +294,7 @@ Cada arquivo é idempotente e não usa `DELIMITER`. Statements separados por `;`
 | Evento | Atributos |
 |---|---|
 | `ServiceOrderCreated` | `orderId`, `customerId`, `vehicleId`, `correlationId`, `env` |
-| `ServiceOrderStatusChanged` | `orderId`, `fromStatus`, `toStatus`, `durationSeconds`, `totalAmount`, `correlationId`, `env` |
+| `ServiceOrderStatusChanged` | `orderId`, `fromStatus`, `toStatus`, `durationSeconds`, `orderAgeSeconds`, `totalAmount`, `correlationId`, `env` |
 
 Emitidos por um subscriber registrado no `InMemoryEventDispatcher` já existente. `durationSeconds`
 = tempo desde a transição anterior, obtido da `service_order_status_history`.
@@ -303,6 +303,12 @@ Emitidos por um subscriber registrado no `InMemoryEventDispatcher` já existente
 > os painéis de ticket médio e faturamento do dashboard de negócio dependem dele, e o valor já
 > existe no agregado. No evento de domínio é um parâmetro **opcional** (default `0.00`) porque é
 > enriquecimento de telemetria, não parte da identidade da transição de status.
+
+> **Adendo 6 (dashboards).** `orderAgeSeconds` foi acrescentado a `ServiceOrderStatusChanged`:
+> segundos desde a primeira transição registrada da OS, isto é, desde a abertura. Na transição
+> para `DELIVERED` ele **é** o lead time. A versão anterior do painel somava os `durationSeconds`
+> das transições dentro da janela e dividia pelo número de OS, o que contava pela metade qualquer
+> OS aberta antes do início da janela.
 
 A emissão usa `newrelic_record_custom_event()` **quando a extensão existe**; caso contrário é
 no-op silencioso (para não quebrar testes nem o ambiente local).
