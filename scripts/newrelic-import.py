@@ -17,6 +17,10 @@ Uso:
     scripts/newrelic-import.py --env hml --endpoint https://xxxx.execute-api.us-east-1.amazonaws.com
     scripts/newrelic-import.py --env hml --endpoint https://... --dry-run
 
+Pode rodar quantas vezes precisar: o que já existe com o mesmo nome é atualizado no
+lugar — dashboards mantêm o GUID e a URL, condições de alerta são atualizadas pelo
+nome, e o monitor Synthetic existente é mantido. Nada é criado em dobro.
+
 Ao final imprime os entity GUIDs criados — são eles que alimentam os secrets
 NEW_RELIC_INFRA_ENTITY_GUID e NEW_RELIC_LAMBDA_ENTITY_GUID.
 """
@@ -166,6 +170,45 @@ mutation($accountId: Int!, $policyId: ID!, $condition: AlertsNrqlConditionStatic
 }
 """
 
+Q_DASHBOARD_UPDATE = """
+mutation($guid: EntityGuid!, $dashboard: DashboardInput!) {
+  dashboardUpdate(guid: $guid, dashboard: $dashboard) {
+    entityResult { guid name }
+    errors { description type }
+  }
+}
+"""
+
+Q_BUSCA_ENTIDADE = """
+query($busca: String!) {
+  actor { entitySearch(query: $busca) { results { entities { guid name } } } }
+}
+"""
+
+Q_POLICIES = """
+query($accountId: Int!, $name: String!) {
+  actor { account(id: $accountId) { alerts {
+    policiesSearch(searchCriteria: {name: $name}) { policies { id name } }
+  } } }
+}
+"""
+
+Q_CONDITIONS = """
+query($accountId: Int!, $policyId: ID!) {
+  actor { account(id: $accountId) { alerts {
+    nrqlConditionsSearch(searchCriteria: {policyId: $policyId}) { nrqlConditions { id name } }
+  } } }
+}
+"""
+
+Q_CONDITION_UPDATE = """
+mutation($accountId: Int!, $id: ID!, $condition: AlertsNrqlConditionUpdateStaticInput!) {
+  alertsNrqlConditionStaticUpdate(accountId: $accountId, id: $id, condition: $condition) {
+    id name
+  }
+}
+"""
+
 Q_SYNTHETIC = """
 mutation($accountId: Int!, $monitor: SyntheticsCreateSimpleMonitorInput!) {
   syntheticsCreateSimpleMonitor(accountId: $accountId, monitor: $monitor) {
@@ -176,6 +219,19 @@ mutation($accountId: Int!, $monitor: SyntheticsCreateSimpleMonitorInput!) {
 """
 
 
+def buscar_por_nome(tipo: str, nome: str, acct: int, key: str, region: str) -> list[dict]:
+    """Entidades do tipo dado com exatamente este nome, nesta conta.
+
+    Rodar o import duas vezes criava tudo em dobro: dois dashboards com o mesmo
+    nome, dois conjuntos de alertas disparando para o mesmo problema. A busca por
+    nome exato é o que torna o script seguro para rodar de novo.
+    """
+    busca = f"type = '{tipo}' AND accountId = {acct} AND name = '{nome}'"
+    data = nerdgraph(Q_BUSCA_ENTIDADE, {"busca": busca}, key, region)
+    achadas = data["actor"]["entitySearch"]["results"]["entities"]
+    return [e for e in achadas if e["name"] == nome]
+
+
 def create_dashboard(path: str, env, acct, endpoint, key, dry, region="us") -> str | None:
     dash = load(path, env, acct, endpoint)
     dash["name"] = f"{dash['name']} · {env}"
@@ -184,15 +240,28 @@ def create_dashboard(path: str, env, acct, endpoint, key, dry, region="us") -> s
 
     if dry:
         pages = ", ".join(f"{p['name']} ({len(p.get('widgets', []))} painéis)" for p in dash["pages"])
-        print(f"  [dry-run] dashboardCreate  {dash['name']}  ->  {pages}")
+        print(f"  [dry-run] criar ou atualizar  {dash['name']}  ->  {pages}")
         return None
 
-    data = nerdgraph(Q_DASHBOARD, {"accountId": acct, "dashboard": dash}, key, region)
-    res = data["dashboardCreate"]
+    # Atualizar no lugar preserva o GUID — e com ele a URL que já foi compartilhada.
+    existentes = buscar_por_nome("DASHBOARD", dash["name"], acct, key, region)
+    if len(existentes) > 1:
+        print(f"  aviso: {len(existentes)} dashboards chamados '{dash['name']}'; atualizando o primeiro.")
+        for e in existentes[1:]:
+            print(f"         duplicado  guid={e['guid']}  (apague pela interface)")
+
+    if existentes:
+        guid = existentes[0]["guid"]
+        data = nerdgraph(Q_DASHBOARD_UPDATE, {"guid": guid, "dashboard": dash}, key, region)
+        res, acao = data["dashboardUpdate"], "atualizado"
+    else:
+        data = nerdgraph(Q_DASHBOARD, {"accountId": acct, "dashboard": dash}, key, region)
+        res, acao = data["dashboardCreate"], "criado"
+
     if res.get("errors"):
-        raise SystemExit(f"Falha ao criar o dashboard {dash['name']}:\n{json.dumps(res['errors'], indent=2)}")
+        raise SystemExit(f"Falha ao gravar o dashboard {dash['name']}:\n{json.dumps(res['errors'], indent=2)}")
     guid = res["entityResult"]["guid"]
-    print(f"  criado  {res['entityResult']['name']}  guid={guid}")
+    print(f"  {acao}  {res['entityResult']['name']}  guid={guid}")
     return guid
 
 
@@ -210,8 +279,20 @@ def create_alerts(env, acct, endpoint, key, dry, region="us") -> None:
             print(f"  [dry-run]   condição  {c['name']}")
         return
 
-    policy = nerdgraph(Q_POLICY, {"accountId": acct, "policy": policy_in}, key, region)["alertsPolicyCreate"]
-    print(f"  política criada  {policy['name']}  id={policy['id']}")
+    policies = nerdgraph(Q_POLICIES, {"accountId": acct, "name": policy_in["name"]}, key, region)
+    policies = [x for x in policies["actor"]["account"]["alerts"]["policiesSearch"]["policies"]
+                if x["name"] == policy_in["name"]]
+
+    if policies:
+        policy = policies[0]
+        print(f"  política existente  {policy['name']}  id={policy['id']}")
+        conds = nerdgraph(Q_CONDITIONS, {"accountId": acct, "policyId": policy["id"]}, key, region)
+        por_nome = {x["name"]: x["id"] for x in
+                    conds["actor"]["account"]["alerts"]["nrqlConditionsSearch"]["nrqlConditions"]}
+    else:
+        policy = nerdgraph(Q_POLICY, {"accountId": acct, "policy": policy_in}, key, region)["alertsPolicyCreate"]
+        print(f"  política criada  {policy['name']}  id={policy['id']}")
+        por_nome = {}
 
     for c in doc["conditions"]:
         cond = {
@@ -225,8 +306,13 @@ def create_alerts(env, acct, endpoint, key, dry, region="us") -> None:
         if c.get("description"):
             cond["description"] = c["description"]
 
-        nerdgraph(Q_CONDITION, {"accountId": acct, "policyId": policy["id"], "condition": cond}, key, region)
-        print(f"    condição  {c['name']}")
+        if c["name"] in por_nome:
+            nerdgraph(Q_CONDITION_UPDATE,
+                      {"accountId": acct, "id": por_nome[c["name"]], "condition": cond}, key, region)
+            print(f"    atualizada  {c['name']}")
+        else:
+            nerdgraph(Q_CONDITION, {"accountId": acct, "policyId": policy["id"], "condition": cond}, key, region)
+            print(f"    criada      {c['name']}")
 
 
 def create_synthetic(env, acct, endpoint, key, dry, region="us") -> None:
@@ -245,6 +331,10 @@ def create_synthetic(env, acct, endpoint, key, dry, region="us") -> None:
 
     if dry:
         print(f"  [dry-run] syntheticsCreateSimpleMonitor  {monitor['name']}  {monitor['uri']}")
+        return
+
+    if buscar_por_nome("MONITOR", monitor["name"], acct, key, region):
+        print(f"  monitor existente  {monitor['name']}  (mantido)")
         return
 
     data = nerdgraph(Q_SYNTHETIC, {"accountId": acct, "monitor": monitor}, key, region)
