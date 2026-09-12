@@ -42,6 +42,8 @@ import argparse
 import json
 import os
 import random
+import shutil
+import subprocess
 import sys
 import time
 import urllib.error
@@ -59,6 +61,31 @@ PROXIMO = {
     "EXECUTING": "FINISHED",
     "FINISHED": "DELIVERED",
 }
+
+
+def ler_segredo(secret_id: str, region: str) -> dict:
+    """Busca as credenciais direto no Secrets Manager, via aws CLI.
+
+    Evita o passo manual de exportar variaveis — que e' onde a maioria dos erros
+    acontece: chave com nome errado, aspas, variavel que nao sobreviveu a troca de
+    terminal.
+    """
+    if not shutil.which("aws"):
+        sys.exit("aws CLI nao encontrado. Use as variaveis de ambiente, ou instale o CLI.")
+
+    try:
+        saida = subprocess.run(
+            ["aws", "secretsmanager", "get-secret-value", "--secret-id", secret_id,
+             "--region", region, "--query", "SecretString", "--output", "text"],
+            capture_output=True, text=True, timeout=60, check=True,
+        ).stdout.strip()
+    except subprocess.CalledProcessError as e:
+        sys.exit(f"Falha ao ler {secret_id}:\n{e.stderr.strip()[:400]}")
+
+    try:
+        return json.loads(saida)
+    except json.JSONDecodeError:
+        sys.exit(f"O segredo {secret_id} nao e' um JSON valido.")
 
 
 def http(metodo: str, url: str, token: str | None = None, corpo: dict | None = None,
@@ -89,9 +116,10 @@ def entrar(api: str, senha: str) -> str:
     st, corpo = http("POST", f"{api}/api/auth/login",
                      corpo={"username": os.environ.get("ADMIN_USERNAME", "admin"), "password": senha})
     if st != 200 or not isinstance(corpo, dict) or "token" not in corpo:
-        sys.exit(f"Login falhou (HTTP {st}): {corpo}\n"
-                 "A senha está em: aws secretsmanager get-secret-value "
-                 "--secret-id oficina/hml/auth --region us-east-1")
+        dica = ("O gateway barrou a rota — ela precisa existir sem authorizer."
+                if isinstance(corpo, dict) and corpo.get("message") == "Unauthorized"
+                else "Credenciais recusadas pela aplicacao: confira ADMIN_USERNAME e ADMIN_PASSWORD.")
+        sys.exit(f"Login falhou (HTTP {st}): {corpo}\n{dica}")
     return corpo["token"]
 
 
@@ -113,13 +141,29 @@ def main() -> None:
     ap.add_argument("--api", default=os.environ.get("API", API_PADRAO))
     ap.add_argument("--novas", type=int, default=18, help="ordens novas a criar")
     ap.add_argument("--avancar", type=int, default=35, help="ordens do seed a movimentar")
+    ap.add_argument("--secret-id", default="oficina/hml/auth",
+                    help="segredo do Secrets Manager com as credenciais de admin")
+    ap.add_argument("--region", default="us-east-1")
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args()
 
     senha = os.environ.get("ADMIN_PASSWORD", "")
     webhook = os.environ.get("WEBHOOK_TOKEN", "")
+    usuario = os.environ.get("ADMIN_USERNAME", "")
+
     if not senha:
-        sys.exit("ADMIN_PASSWORD não definido. Pegue em oficina/hml/auth no Secrets Manager.")
+        print(f"==> buscando credenciais em {args.secret_id} ({args.region})")
+        seg = ler_segredo(args.secret_id, args.region)
+        faltando = [k for k in ("ADMIN_USERNAME", "ADMIN_PASSWORD") if k not in seg]
+        if faltando:
+            sys.exit(f"O segredo nao tem: {', '.join(faltando)}. Chaves presentes: {', '.join(seg)}")
+        usuario = seg["ADMIN_USERNAME"]
+        senha = seg["ADMIN_PASSWORD"]
+        webhook = webhook or seg.get("WEBHOOK_TOKEN", "")
+        print(f"    usuario '{usuario}', senha com {len(senha)} caracteres"
+              f"{', webhook token presente' if webhook else ', sem webhook token'}")
+
+    os.environ["ADMIN_USERNAME"] = usuario or "admin"
 
     print(f"==> {args.api}")
     token = entrar(args.api, senha)
