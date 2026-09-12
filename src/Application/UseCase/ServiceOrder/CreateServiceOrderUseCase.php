@@ -7,6 +7,7 @@ namespace App\Application\UseCase\ServiceOrder;
 use App\Application\DTO\ServiceOrder\CreateServiceOrderInputDTO;
 use App\Domain\Aggregate\ServiceOrder;
 use App\Domain\Exception\DomainException;
+use App\Domain\Event\EventDispatcherInterface;
 use App\Domain\Exception\NotFoundException;
 use App\Domain\Repository\CustomerRepositoryInterface;
 use App\Domain\Repository\ServiceOrderRepositoryInterface;
@@ -20,6 +21,7 @@ class CreateServiceOrderUseCase
         private readonly VehicleRepositoryInterface $vehicleRepository,
         private readonly ServiceOrderRepositoryInterface $orderRepository,
         private readonly UuidGeneratorInterface $uuidGenerator,
+        private readonly EventDispatcherInterface $eventDispatcher,
     ) {
     }
 
@@ -46,6 +48,12 @@ class CreateServiceOrderUseCase
         );
 
         $this->orderRepository->save($order);
+
+        // Sem isto o ServiceOrderCreatedEvent fica registrado no agregado e nunca e'
+        // publicado: nao vira custom event no New Relic, e o StatusHistorySubscriber
+        // nao grava a linha inicial do historico. Os paineis de volume diario, OS
+        // abertas e clientes atendidos ficam zerados sem que nada falhe.
+        $this->eventDispatcher->dispatchAll($order->releaseEvents());
 
         return $order;
     }
