@@ -87,12 +87,22 @@ jobs:
       # ambiente): vem do segredo de repositório e é aplicada como Secret
       # próprio, consumido com `optional: true` pelo Deployment.
       - name: Aplicar Secret da license key do New Relic
+        id: nrsecret
         env:
           NEW_RELIC_LICENSE_KEY: ${{ secrets.NEW_RELIC_LICENSE_KEY }}
         run: |
           kubectl -n "${{ steps.ssm.outputs.namespace }}" create secret generic oficina-newrelic \
             --from-literal=NEW_RELIC_LICENSE_KEY="$NEW_RELIC_LICENSE_KEY" \
             --dry-run=client -o yaml | kubectl apply -f -
+
+          # Variavel de ambiente e' fixada no start do pod. Trocar o Secret nao
+          # reinicia nada: se a imagem nao mudou, o apply nao ve diferenca no
+          # Deployment, nao ha rollout, e os pods seguem com o valor antigo — o
+          # agente continua inerte e ninguem percebe, porque nada falha.
+          #
+          # A anotacao com o hash da chave resolve sem reiniciar a toa: chave
+          # diferente muda o pod template e dispara rollout; chave igual e' no-op.
+          echo "keyhash=$(printf '%s' "$NEW_RELIC_LICENSE_KEY" | sha256sum | cut -c1-16)" >> "$GITHUB_OUTPUT"
 
       # ── Manifests ─────────────────────────────────────────────────────────
       - name: Fixar imagem e ARN do target group no overlay
@@ -153,6 +163,12 @@ jobs:
             exit 1
           fi
           kubectl -n "$NS" logs job/oficina-migrate --all-containers --tail=100
+
+      - name: Propagar mudanca da license key para os pods
+        run: |
+          set -euo pipefail
+          kubectl -n "${{ steps.ssm.outputs.namespace }}" patch deployment oficina-api \
+            -p '{"spec":{"template":{"metadata":{"annotations":{"oficina/newrelic-key-hash":"${{ steps.nrsecret.outputs.keyhash }}"}}}}}'
 
       - name: Aguardar rollout
         env:
