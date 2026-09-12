@@ -22,7 +22,9 @@ custom events `ServiceOrderCreated` e `ServiceOrderStatusChanged`, e log estrutu
 4. **License key** (`...NRAL`) para o agente — vai nos secrets de repositório
    (`NEW_RELIC_LICENSE_KEY`) e é consumida pelo `nri-bundle` e pelo agente PHP.
 5. Telemetria já chegando: a aplicação com o agente PHP (`NEW_RELIC_APP_NAME=oficina-api-prod`),
-   o `nri-bundle` instalado pelo `oficina-infra-k8s` e a layer do New Relic nas Lambdas.
+   o `nri-bundle` instalado pelo `oficina-infra-k8s` e o Firehose de logs do `oficina-lambda-auth`
+   (as Lambdas rodam numa VPC sem NAT, então a extensão do New Relic não alcança a internet;
+   os logs saem pelo CloudWatch → Kinesis Firehose → New Relic).
 
 > **Importe os dashboards só depois que houver dado.** Painéis vazios não confirmam nada — e o
 > erro mais comum (nome de evento ou de atributo diferente do contrato) só aparece com dado real.
@@ -158,12 +160,19 @@ visualmente sem precisar silenciar nada.
 
 ---
 
-## Divergências conhecidas em relação aos Contratos
+## Decisões nas consultas
 
-| Item | Situação |
+Cada item abaixo foi conferido contra dado real da conta, não contra a documentação.
+
+| Painel ou alerta | Decisão |
 |---|---|
-| **`totalAmount` no `ServiceOrderStatusChanged`** | Os painéis de **ticket médio** e **faturamento** consultam `average(totalAmount)`, mas a seção 7 dos Contratos **não lista** esse atributo. Sem ele, esses dois painéis ficam vazios. Requer adendo ao contrato e ajuste no `NewRelicSubscriber` (WS-D12): incluir `totalAmount` no evento, ao menos nas transições para `FINISHED` e `DELIVERED`. |
+| **Painéis de API** | Excluem `/api/health` e `/api/ready`. As sondas do kubelet e do Synthetic são ~99% das transações: com elas, o p95 medido era 7,9 ms; sem elas, a latência real da API era 53,5 ms. Um alerta de 5xx diluído por 99% de sondas saudáveis nunca dispararia. |
+| **Por rota** | O agente PHP nomeia toda transação como `WebTransaction/Uri/index.php`, porque tudo entra pelo front controller. O `Router` chama `newrelic_name_transaction()` com o **padrão** da rota (`PATCH /api/service-orders/{id}/status`), não a URI concreta, para não criar uma transação por OS. |
+| **Latência p50/p95/p99** | `percentile(duration * 1000, 50, 95, 99)`. A forma `percentile(...) * 1000` é inválida com mais de um percentil. |
+| **HPA** | O `K8sHpaSample` não tem `hpaName`; o nome do HPA está em `displayName`. |
+| **Reinícios de container** | `sum(restartCountDelta)`. Somar `restartCount`, que é cumulativo, contaria o mesmo reinício em toda amostra, e o alerta ficaria disparado para sempre depois do primeiro. |
+| **Lead time** | `average(orderAgeSeconds)` na transição para `DELIVERED` (Adendo 6 dos Contratos). |
+| **Funil** | Começa em `ServiceOrderCreated`, com os dois eventos no mesmo `FROM`. Sem isso, o funil começava no diagnóstico e não mostrava quantas OS abertas chegaram lá. |
 | **`durationSeconds` em `ServiceOrderCreated`** | Não existe, e está correto: `RECEIVED` é o primeiro estado, não há transição anterior. O painel de tempo por status filtra `fromStatus IS NOT NULL` por causa disso. |
-| **Nomes das entidades de Lambda** | As consultas assumem `entityName` = `oficina-prod-auth-cpf` e `oficina-prod-jwt-authorizer`. Confirmar contra o Terraform do `oficina-lambda-auth` (WS-C9) e ajustar se o padrão de nome divergir. |
-| **`containerName = 'php-fpm'`** | Assumido a partir do desenho do Pod (Nginx + PHP-FPM). Confirmar contra `deploy/base` (WS-D17). |
-| **Campos do access log do gateway** | As consultas de `Log` usam `status` e `routeKey`, que dependem do formato do access log JSON definido no WS-C10. |
+| **Lambdas e gateway** | Consultam `Log`, não `AwsLambdaInvocation`. As Lambdas estão numa VPC sem NAT, então nenhum agente dentro delas alcança o New Relic. Os logs saem pelo Firehose do `oficina-lambda-auth`. Invocações, duração e cold start vêm da linha `REPORT` que a AWS escreve a cada invocação (`Init Duration` só aparece no cold start). Erros vêm do log estruturado das funções (`level = 'error'`) e das linhas de timeout ou de runtime encerrado. |
+| **Access log do gateway** | Os campos são `status` e `route`, conforme o `format` do stage em `apigateway.tf`. |

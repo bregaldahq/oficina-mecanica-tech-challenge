@@ -6,8 +6,8 @@ namespace App\Application\UseCase\ServiceOrder;
 
 use App\Application\DTO\ServiceOrder\CreateServiceOrderInputDTO;
 use App\Domain\Aggregate\ServiceOrder;
-use App\Domain\Exception\DomainException;
 use App\Domain\Event\EventDispatcherInterface;
+use App\Domain\Exception\DomainException;
 use App\Domain\Exception\NotFoundException;
 use App\Domain\Repository\CustomerRepositoryInterface;
 use App\Domain\Repository\ServiceOrderRepositoryInterface;
