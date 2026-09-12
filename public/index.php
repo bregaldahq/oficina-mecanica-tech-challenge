@@ -114,7 +114,7 @@ $serviceItemController = new \App\Presentation\Controller\ServiceItemController(
 
 $orderController = new \App\Presentation\Controller\ServiceOrderController(
     new \App\Application\UseCase\ServiceOrder\CreateServiceOrderUseCase(
-        $customerRepo, $vehicleRepo, $orderRepo, $uuid
+        $customerRepo, $vehicleRepo, $orderRepo, $uuid, $eventDispatcher
     ),
     new \App\Application\UseCase\ServiceOrder\AddItemsToServiceOrderUseCase(
         $orderRepo, $serviceItemRepo, $partRepo
