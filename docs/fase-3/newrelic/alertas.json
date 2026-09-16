@@ -178,7 +178,7 @@
       "description": "Erros na Lambda de autenticação por CPF acima de 1% das invocações. Impede o cliente de obter token. Atenção: respostas 400/403/404 de regra de negócio NÃO contam como erro — só exceção não tratada. Runbook: conferir acesso ao RDS pelo SG cliente de banco e a leitura do segredo oficina/prod/auth.",
       "enabled": true,
       "nrql": {
-        "query": "SELECT filter(count(*), WHERE (level = 'error' OR message LIKE '%Task timed out%' OR message LIKE '%Runtime exited%' OR message LIKE '%Runtime.ExitError%')) * 100 / filter(count(*), WHERE message LIKE 'REPORT RequestId%') AS 'Erro %' FROM Log WHERE aws.logGroup = '/aws/lambda/oficina-prod-auth-cpf'"
+        "query": "SELECT filter(count(*), WHERE (level = 'error' OR message LIKE '%Task timed out%' OR message LIKE '%Runtime exited%' OR message LIKE '%Runtime.ExitError%')) * 100 / filter(count(*), WHERE message LIKE 'REPORT RequestId%') AS 'Erro %' FROM Log WHERE logGroup = '/aws/lambda/oficina-prod-auth-cpf'"
       },
       "signal": {
         "aggregationWindow": 300,
@@ -203,7 +203,7 @@
       "description": "Erros no authorizer derrubam TODAS as rotas /api/**, e não só o login. Severidade máxima. Runbook: conferir a leitura do segredo e o timeout da função.",
       "enabled": true,
       "nrql": {
-        "query": "SELECT filter(count(*), WHERE (level = 'error' OR message LIKE '%Task timed out%' OR message LIKE '%Runtime exited%' OR message LIKE '%Runtime.ExitError%')) * 100 / filter(count(*), WHERE message LIKE 'REPORT RequestId%') AS 'Erro %' FROM Log WHERE aws.logGroup = '/aws/lambda/oficina-prod-jwt-authorizer'"
+        "query": "SELECT filter(count(*), WHERE (level = 'error' OR message LIKE '%Task timed out%' OR message LIKE '%Runtime exited%' OR message LIKE '%Runtime.ExitError%')) * 100 / filter(count(*), WHERE message LIKE 'REPORT RequestId%') AS 'Erro %' FROM Log WHERE logGroup = '/aws/lambda/oficina-prod-jwt-authorizer'"
       },
       "signal": {
         "aggregationWindow": 300,

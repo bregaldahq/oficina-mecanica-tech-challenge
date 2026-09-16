@@ -257,7 +257,7 @@
             "nrqlQueries": [
               {
                 "accountIds": [0],
-                "query": "SELECT count(*) FROM Log WHERE aws.logGroup IN ('/aws/lambda/oficina-prod-auth-cpf', '/aws/lambda/oficina-prod-jwt-authorizer') AND message LIKE 'REPORT RequestId%' FACET aws.logGroup SINCE 3 hours ago TIMESERIES"
+                "query": "SELECT count(*) FROM Log WHERE logGroup IN ('/aws/lambda/oficina-prod-auth-cpf', '/aws/lambda/oficina-prod-jwt-authorizer') AND message LIKE 'REPORT RequestId%' FACET logGroup SINCE 3 hours ago TIMESERIES"
               }
             ],
             "platformOptions": { "ignoreTimeRange": false }
@@ -271,7 +271,7 @@
             "nrqlQueries": [
               {
                 "accountIds": [0],
-                "query": "SELECT count(*) AS 'Invocações', percentile(numeric(aparse(message, 'REPORT RequestId: %Duration: * ms%Billed Duration%')), 50) AS 'p50 (ms)', percentile(numeric(aparse(message, 'REPORT RequestId: %Duration: * ms%Billed Duration%')), 95) AS 'p95 (ms)', percentile(numeric(aparse(message, 'REPORT RequestId: %Duration: * ms%Billed Duration%')), 99) AS 'p99 (ms)' FROM Log WHERE aws.logGroup IN ('/aws/lambda/oficina-prod-auth-cpf', '/aws/lambda/oficina-prod-jwt-authorizer') AND message LIKE 'REPORT RequestId%' FACET aws.logGroup SINCE 3 hours ago"
+                "query": "SELECT count(*) AS 'Invocações', percentile(numeric(aparse(message, 'REPORT RequestId: %Duration: * ms%Billed Duration%')), 50) AS 'p50 (ms)', percentile(numeric(aparse(message, 'REPORT RequestId: %Duration: * ms%Billed Duration%')), 95) AS 'p95 (ms)', percentile(numeric(aparse(message, 'REPORT RequestId: %Duration: * ms%Billed Duration%')), 99) AS 'p99 (ms)' FROM Log WHERE logGroup IN ('/aws/lambda/oficina-prod-auth-cpf', '/aws/lambda/oficina-prod-jwt-authorizer') AND message LIKE 'REPORT RequestId%' FACET logGroup SINCE 3 hours ago"
               }
             ]
           }
@@ -284,7 +284,7 @@
             "nrqlQueries": [
               {
                 "accountIds": [0],
-                "query": "SELECT count(*) AS 'Cold starts' FROM Log WHERE aws.logGroup IN ('/aws/lambda/oficina-prod-auth-cpf', '/aws/lambda/oficina-prod-jwt-authorizer') AND message LIKE 'REPORT RequestId%' AND message LIKE '%Init Duration%' FACET aws.logGroup SINCE 3 hours ago TIMESERIES"
+                "query": "SELECT count(*) AS 'Cold starts' FROM Log WHERE logGroup IN ('/aws/lambda/oficina-prod-auth-cpf', '/aws/lambda/oficina-prod-jwt-authorizer') AND message LIKE 'REPORT RequestId%' AND message LIKE '%Init Duration%' FACET logGroup SINCE 3 hours ago TIMESERIES"
               }
             ],
             "platformOptions": { "ignoreTimeRange": false }
@@ -298,7 +298,7 @@
             "nrqlQueries": [
               {
                 "accountIds": [0],
-                "query": "SELECT percentage(count(*), WHERE message LIKE '%Init Duration%') AS 'Cold start %', average(numeric(aparse(message, '%Init Duration: * ms%'))) AS 'Init médio (ms)', max(numeric(aparse(message, '%Init Duration: * ms%'))) AS 'Init máximo (ms)' FROM Log WHERE aws.logGroup IN ('/aws/lambda/oficina-prod-auth-cpf', '/aws/lambda/oficina-prod-jwt-authorizer') AND message LIKE 'REPORT RequestId%' FACET aws.logGroup SINCE 1 day ago"
+                "query": "SELECT percentage(count(*), WHERE message LIKE '%Init Duration%') AS 'Cold start %', average(numeric(aparse(message, '%Init Duration: * ms%'))) AS 'Init médio (ms)', max(numeric(aparse(message, '%Init Duration: * ms%'))) AS 'Init máximo (ms)' FROM Log WHERE logGroup IN ('/aws/lambda/oficina-prod-auth-cpf', '/aws/lambda/oficina-prod-jwt-authorizer') AND message LIKE 'REPORT RequestId%' FACET logGroup SINCE 1 day ago"
               }
             ]
           }
@@ -311,7 +311,7 @@
             "nrqlQueries": [
               {
                 "accountIds": [0],
-                "query": "SELECT filter(count(*), WHERE (level = 'error' OR message LIKE '%Task timed out%' OR message LIKE '%Runtime exited%' OR message LIKE '%Runtime.ExitError%')) * 100 / filter(count(*), WHERE message LIKE 'REPORT RequestId%') AS 'Erro %' FROM Log WHERE aws.logGroup = '/aws/lambda/oficina-prod-auth-cpf' SINCE 3 hours ago TIMESERIES"
+                "query": "SELECT filter(count(*), WHERE (level = 'error' OR message LIKE '%Task timed out%' OR message LIKE '%Runtime exited%' OR message LIKE '%Runtime.ExitError%')) * 100 / filter(count(*), WHERE message LIKE 'REPORT RequestId%') AS 'Erro %' FROM Log WHERE logGroup = '/aws/lambda/oficina-prod-auth-cpf' SINCE 3 hours ago TIMESERIES"
               }
             ],
             "platformOptions": { "ignoreTimeRange": false }
@@ -325,7 +325,7 @@
             "nrqlQueries": [
               {
                 "accountIds": [0],
-                "query": "SELECT count(*) FROM Log WHERE aws.logGroup = '/aws/apigateway/oficina-prod-api/access' FACET status SINCE 3 hours ago TIMESERIES"
+                "query": "SELECT count(*) FROM Log WHERE logGroup = '/aws/apigateway/oficina-prod-api/access' FACET status SINCE 3 hours ago TIMESERIES"
               }
             ],
             "platformOptions": { "ignoreTimeRange": false }
@@ -339,7 +339,7 @@
             "nrqlQueries": [
               {
                 "accountIds": [0],
-                "query": "SELECT count(*) FROM Log WHERE aws.logGroup = '/aws/apigateway/oficina-prod-api/access' AND status IN ('401', '403') FACET route SINCE 1 day ago"
+                "query": "SELECT count(*) FROM Log WHERE logGroup = '/aws/apigateway/oficina-prod-api/access' AND status IN ('401', '403') FACET route SINCE 1 day ago"
               }
             ]
           }
