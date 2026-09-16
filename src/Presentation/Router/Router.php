@@ -25,9 +25,23 @@ class Router
 
     private ?AuthMiddleware $authMiddleware = null;
 
+    /** @var (\Closure(string): void)|null */
+    private ?\Closure $transactionNamer = null;
+
     public function setAuthMiddleware(AuthMiddleware $middleware): void
     {
         $this->authMiddleware = $middleware;
+    }
+
+    /**
+     * Replaces the default transaction namer. Tests inject a closure here; production uses
+     * the New Relic agent when the extension is loaded.
+     *
+     * @param \Closure(string): void $namer
+     */
+    public function setTransactionNamer(\Closure $namer): void
+    {
+        $this->transactionNamer = $namer;
     }
 
     public function get(string $pattern, callable $handler, bool $requireAuth = true): self
@@ -102,6 +116,9 @@ class Router
                 continue;
             }
 
+            // Named before authentication, so 401 and 403 are attributed to the route too.
+            $this->nameTransaction($route['method'] . ' ' . $route['pattern']);
+
             /** @var array<string, mixed> $claims */
             $claims = [];
 
@@ -120,8 +137,27 @@ class Router
             return;
         }
 
+        $this->nameTransaction('404');
         http_response_code(404);
         echo json_encode(['error' => 'Rota não encontrada.']);
+    }
+
+    /**
+     * Every request enters through public/index.php, so without this the PHP agent reports a
+     * single transaction, `WebTransaction/Uri/index.php`, and every per-route panel collapses
+     * into one line. The route pattern (not the concrete URI) keeps cardinality bounded:
+     * `/api/service-orders/{id}/status` is one transaction, not one per order.
+     */
+    private function nameTransaction(string $name): void
+    {
+        if ($this->transactionNamer !== null) {
+            ($this->transactionNamer)($name);
+            return;
+        }
+
+        if (function_exists('newrelic_name_transaction')) {
+            newrelic_name_transaction($name);
+        }
     }
 
     /**
