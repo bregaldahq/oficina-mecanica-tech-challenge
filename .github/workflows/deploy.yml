@@ -1,14 +1,19 @@
 name: Deploy
 
 # Seção 9 dos Contratos:
-#   push em `develop` → ambiente `homologacao` (namespace oficina-hml)
-#   push em `main`    → ambiente `producao`    (namespace oficina-prod)
+#   push em `develop`             → ambiente `homologacao` (namespace oficina-hml)
+#   disparo manual com ref `main` → ambiente `producao`    (namespace oficina-prod)
 #
 # Autenticação AWS exclusivamente por OIDC (nenhuma access key estática).
 # Todo o acoplamento com os outros repositórios é lido do SSM Parameter Store.
 on:
   push:
-    branches: [develop, main]
+    branches: [develop]
+  # Produção não aplica sozinha. Um merge em `main` é uma decisão de código;
+  # aplicar em produção é uma decisão de operação, e as duas não devem acontecer
+  # no mesmo gesto. Já aconteceu neste projeto: um merge de correção em `main`
+  # provisionou um cluster de produção inteiro sem ninguém pedir. Para aplicar
+  # em `main`, dispare este workflow manualmente com a ref `main`.
   workflow_dispatch:
     inputs:
       migrations_ref:
