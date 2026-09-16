@@ -5,7 +5,7 @@
   "pages": [
     {
       "name": "API",
-      "description": "Latência, throughput e erros da aplicação PHP.",
+      "description": "Latência, throughput e erros da aplicação PHP. As sondas /api/health e /api/ready ficam de fora: são ~99% das requisições e mascaram a latência real.",
       "widgets": [
         {
           "title": "Throughput (req/min)",
@@ -15,7 +15,7 @@
             "nrqlQueries": [
               {
                 "accountIds": [0],
-                "query": "SELECT rate(count(*), 1 minute) AS 'req/min' FROM Transaction WHERE appName = 'oficina-api-prod' SINCE 30 minutes ago COMPARE WITH 1 day ago"
+                "query": "SELECT rate(count(*), 1 minute) AS 'req/min' FROM Transaction WHERE appName = 'oficina-api-prod' AND request.uri NOT IN ('/api/health', '/api/ready') SINCE 30 minutes ago COMPARE WITH 1 day ago"
               }
             ],
             "thresholds": []
@@ -29,7 +29,7 @@
             "nrqlQueries": [
               {
                 "accountIds": [0],
-                "query": "SELECT percentile(duration, 95) * 1000 AS 'p95 (ms)' FROM Transaction WHERE appName = 'oficina-api-prod' SINCE 30 minutes ago"
+                "query": "SELECT percentile(duration * 1000, 95) AS 'p95 (ms)' FROM Transaction WHERE appName = 'oficina-api-prod' AND request.uri NOT IN ('/api/health', '/api/ready') SINCE 30 minutes ago"
               }
             ],
             "thresholds": [
@@ -46,7 +46,7 @@
             "nrqlQueries": [
               {
                 "accountIds": [0],
-                "query": "SELECT percentage(count(*), WHERE error IS true) AS 'Erro %' FROM Transaction WHERE appName = 'oficina-api-prod' SINCE 30 minutes ago"
+                "query": "SELECT percentage(count(*), WHERE error IS true) AS 'Erro %' FROM Transaction WHERE appName = 'oficina-api-prod' AND request.uri NOT IN ('/api/health', '/api/ready') SINCE 30 minutes ago"
               }
             ],
             "thresholds": [
@@ -63,7 +63,7 @@
             "nrqlQueries": [
               {
                 "accountIds": [0],
-                "query": "SELECT apdex(duration, t: 0.5) FROM Transaction WHERE appName = 'oficina-api-prod' SINCE 30 minutes ago"
+                "query": "SELECT apdex(duration, t: 0.5) FROM Transaction WHERE appName = 'oficina-api-prod' AND request.uri NOT IN ('/api/health', '/api/ready') SINCE 30 minutes ago"
               }
             ],
             "thresholds": []
@@ -77,7 +77,7 @@
             "nrqlQueries": [
               {
                 "accountIds": [0],
-                "query": "SELECT percentile(duration, 50, 95, 99) * 1000 FROM Transaction WHERE appName = 'oficina-api-prod' SINCE 3 hours ago TIMESERIES"
+                "query": "SELECT percentile(duration * 1000, 50, 95, 99) FROM Transaction WHERE appName = 'oficina-api-prod' AND request.uri NOT IN ('/api/health', '/api/ready') SINCE 3 hours ago TIMESERIES"
               }
             ],
             "platformOptions": { "ignoreTimeRange": false }
@@ -91,7 +91,7 @@
             "nrqlQueries": [
               {
                 "accountIds": [0],
-                "query": "SELECT rate(count(*), 1 minute) FROM Transaction WHERE appName = 'oficina-api-prod' FACET name SINCE 3 hours ago TIMESERIES LIMIT 10"
+                "query": "SELECT rate(count(*), 1 minute) FROM Transaction WHERE appName = 'oficina-api-prod' AND request.uri NOT IN ('/api/health', '/api/ready') FACET name SINCE 3 hours ago TIMESERIES LIMIT 10"
               }
             ],
             "platformOptions": { "ignoreTimeRange": false }
@@ -105,7 +105,7 @@
             "nrqlQueries": [
               {
                 "accountIds": [0],
-                "query": "SELECT count(*) AS 'Requisições', percentile(duration, 50) * 1000 AS 'p50 (ms)', percentile(duration, 95) * 1000 AS 'p95 (ms)', percentile(duration, 99) * 1000 AS 'p99 (ms)', percentage(count(*), WHERE error IS true) AS 'Erro %' FROM Transaction WHERE appName = 'oficina-api-prod' FACET name SINCE 3 hours ago LIMIT 30"
+                "query": "SELECT count(*) AS 'Requisições', percentile(duration * 1000, 50) AS 'p50 (ms)', percentile(duration * 1000, 95) AS 'p95 (ms)', percentile(duration * 1000, 99) AS 'p99 (ms)', percentage(count(*), WHERE error IS true) AS 'Erro %' FROM Transaction WHERE appName = 'oficina-api-prod' AND request.uri NOT IN ('/api/health', '/api/ready') FACET name SINCE 3 hours ago LIMIT 30"
               }
             ]
           }
@@ -118,7 +118,7 @@
             "nrqlQueries": [
               {
                 "accountIds": [0],
-                "query": "SELECT count(*) FROM Transaction WHERE appName = 'oficina-api-prod' AND http.statusCode >= 400 FACET http.statusCode SINCE 3 hours ago TIMESERIES"
+                "query": "SELECT count(*) FROM Transaction WHERE appName = 'oficina-api-prod' AND request.uri NOT IN ('/api/health', '/api/ready') AND http.statusCode >= 400 FACET http.statusCode SINCE 3 hours ago TIMESERIES"
               }
             ],
             "platformOptions": { "ignoreTimeRange": false }
@@ -132,7 +132,7 @@
             "nrqlQueries": [
               {
                 "accountIds": [0],
-                "query": "SELECT timestamp, correlation_id, method, path, status, exception_class, exception_message FROM Log WHERE service = 'oficina-api' AND env = 'prod' AND level = 'error' SINCE 3 hours ago LIMIT 100"
+                "query": "SELECT timestamp, message, correlation_id, method, path, status, exception_class, exception_message FROM Log WHERE service = 'oficina-api' AND env = 'prod' AND level = 'error' SINCE 3 hours ago LIMIT 100"
               }
             ]
           }
@@ -165,7 +165,7 @@
             "nrqlQueries": [
               {
                 "accountIds": [0],
-                "query": "SELECT latest(currentReplicas) AS 'Atuais', latest(desiredReplicas) AS 'Desejadas', latest(minReplicas) AS 'Mínimo', latest(maxReplicas) AS 'Máximo' FROM K8sHpaSample WHERE hpaName = 'oficina-api' AND namespaceName = 'oficina-prod' SINCE 3 hours ago TIMESERIES"
+                "query": "SELECT latest(currentReplicas) AS 'Atuais', latest(desiredReplicas) AS 'Desejadas', latest(minReplicas) AS 'Mínimo', latest(maxReplicas) AS 'Máximo' FROM K8sHpaSample WHERE displayName = 'oficina-api' AND namespaceName = 'oficina-prod' SINCE 3 hours ago TIMESERIES"
               }
             ],
             "platformOptions": { "ignoreTimeRange": false }
@@ -207,7 +207,7 @@
             "nrqlQueries": [
               {
                 "accountIds": [0],
-                "query": "SELECT sum(restartCount) AS 'Reinícios' FROM K8sContainerSample WHERE namespaceName = 'oficina-prod' SINCE 3 hours ago"
+                "query": "SELECT sum(restartCountDelta) AS 'Reinícios' FROM K8sContainerSample WHERE namespaceName = 'oficina-prod' SINCE 3 hours ago"
               }
             ],
             "thresholds": [
@@ -224,7 +224,7 @@
             "nrqlQueries": [
               {
                 "accountIds": [0],
-                "query": "SELECT latest(status), latest(reason), latest(nodeName) FROM K8sPodSample WHERE namespaceName = 'oficina-prod' AND status != 'Running' FACET podName SINCE 30 minutes ago"
+                "query": "SELECT latest(status), latest(reason), latest(nodeName) FROM K8sPodSample WHERE namespaceName = 'oficina-prod' AND status NOT IN ('Running', 'Succeeded') FACET podName SINCE 30 minutes ago"
               }
             ]
           }
@@ -247,7 +247,7 @@
     },
     {
       "name": "Lambdas e gateway",
-      "description": "Duração, cold start, erros das Lambdas de autenticação e tráfego no API Gateway.",
+      "description": "Invocações, duração, cold start e erros das Lambdas, e tráfego no API Gateway. Fonte: logs do CloudWatch entregues ao New Relic por Kinesis Firehose (oficina-lambda-auth).",
       "widgets": [
         {
           "title": "Invocações por função",
@@ -257,7 +257,7 @@
             "nrqlQueries": [
               {
                 "accountIds": [0],
-                "query": "SELECT count(*) FROM AwsLambdaInvocation WHERE entityName LIKE 'oficina-prod-%' FACET entityName SINCE 3 hours ago TIMESERIES"
+                "query": "SELECT count(*) FROM Log WHERE aws.logGroup IN ('/aws/lambda/oficina-prod-auth-cpf', '/aws/lambda/oficina-prod-jwt-authorizer') AND message LIKE 'REPORT RequestId%' FACET aws.logGroup SINCE 3 hours ago TIMESERIES"
               }
             ],
             "platformOptions": { "ignoreTimeRange": false }
@@ -271,7 +271,7 @@
             "nrqlQueries": [
               {
                 "accountIds": [0],
-                "query": "SELECT count(*) AS 'Invocações', percentile(duration, 50) * 1000 AS 'p50 (ms)', percentile(duration, 95) * 1000 AS 'p95 (ms)', percentile(duration, 99) * 1000 AS 'p99 (ms)', percentage(count(*), WHERE error IS true) AS 'Erro %' FROM AwsLambdaInvocation WHERE entityName LIKE 'oficina-prod-%' FACET entityName SINCE 3 hours ago"
+                "query": "SELECT count(*) AS 'Invocações', percentile(numeric(aparse(message, 'REPORT RequestId: %Duration: * ms%Billed Duration%')), 50) AS 'p50 (ms)', percentile(numeric(aparse(message, 'REPORT RequestId: %Duration: * ms%Billed Duration%')), 95) AS 'p95 (ms)', percentile(numeric(aparse(message, 'REPORT RequestId: %Duration: * ms%Billed Duration%')), 99) AS 'p99 (ms)' FROM Log WHERE aws.logGroup IN ('/aws/lambda/oficina-prod-auth-cpf', '/aws/lambda/oficina-prod-jwt-authorizer') AND message LIKE 'REPORT RequestId%' FACET aws.logGroup SINCE 3 hours ago"
               }
             ]
           }
@@ -284,7 +284,7 @@
             "nrqlQueries": [
               {
                 "accountIds": [0],
-                "query": "SELECT count(*) AS 'Cold starts' FROM AwsLambdaInvocation WHERE entityName LIKE 'oficina-prod-%' AND provider.coldStart IS true FACET entityName SINCE 3 hours ago TIMESERIES"
+                "query": "SELECT count(*) AS 'Cold starts' FROM Log WHERE aws.logGroup IN ('/aws/lambda/oficina-prod-auth-cpf', '/aws/lambda/oficina-prod-jwt-authorizer') AND message LIKE 'REPORT RequestId%' AND message LIKE '%Init Duration%' FACET aws.logGroup SINCE 3 hours ago TIMESERIES"
               }
             ],
             "platformOptions": { "ignoreTimeRange": false }
@@ -298,7 +298,7 @@
             "nrqlQueries": [
               {
                 "accountIds": [0],
-                "query": "SELECT percentage(count(*), WHERE provider.coldStart IS true) AS 'Cold start %', average(duration) * 1000 AS 'Duração média (ms)' FROM AwsLambdaInvocation WHERE entityName LIKE 'oficina-prod-%' FACET entityName, provider.coldStart SINCE 1 day ago"
+                "query": "SELECT percentage(count(*), WHERE message LIKE '%Init Duration%') AS 'Cold start %', average(numeric(aparse(message, '%Init Duration: * ms%'))) AS 'Init médio (ms)', max(numeric(aparse(message, '%Init Duration: * ms%'))) AS 'Init máximo (ms)' FROM Log WHERE aws.logGroup IN ('/aws/lambda/oficina-prod-auth-cpf', '/aws/lambda/oficina-prod-jwt-authorizer') AND message LIKE 'REPORT RequestId%' FACET aws.logGroup SINCE 1 day ago"
               }
             ]
           }
@@ -311,7 +311,7 @@
             "nrqlQueries": [
               {
                 "accountIds": [0],
-                "query": "SELECT percentage(count(*), WHERE error IS true) AS 'Erro %' FROM AwsLambdaInvocation WHERE entityName = 'oficina-prod-auth-cpf' SINCE 3 hours ago TIMESERIES"
+                "query": "SELECT filter(count(*), WHERE (level = 'error' OR message LIKE '%Task timed out%' OR message LIKE '%Runtime exited%' OR message LIKE '%Runtime.ExitError%')) * 100 / filter(count(*), WHERE message LIKE 'REPORT RequestId%') AS 'Erro %' FROM Log WHERE aws.logGroup = '/aws/lambda/oficina-prod-auth-cpf' SINCE 3 hours ago TIMESERIES"
               }
             ],
             "platformOptions": { "ignoreTimeRange": false }
@@ -325,7 +325,7 @@
             "nrqlQueries": [
               {
                 "accountIds": [0],
-                "query": "SELECT count(*) FROM Log WHERE aws.logGroup LIKE '%oficina-prod-api%' FACET status SINCE 3 hours ago TIMESERIES"
+                "query": "SELECT count(*) FROM Log WHERE aws.logGroup = '/aws/apigateway/oficina-prod-api/access' FACET status SINCE 3 hours ago TIMESERIES"
               }
             ],
             "platformOptions": { "ignoreTimeRange": false }
@@ -339,7 +339,7 @@
             "nrqlQueries": [
               {
                 "accountIds": [0],
-                "query": "SELECT count(*) FROM Log WHERE aws.logGroup LIKE '%oficina-prod-api%' AND status IN ('401', '403') FACET routeKey SINCE 1 day ago"
+                "query": "SELECT count(*) FROM Log WHERE aws.logGroup = '/aws/apigateway/oficina-prod-api/access' AND status IN ('401', '403') FACET route SINCE 1 day ago"
               }
             ]
           }

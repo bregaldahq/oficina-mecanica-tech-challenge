@@ -41,6 +41,7 @@ RUN set -eux; \
     rm -rf /var/lib/apt/lists/*
 
 COPY docker/php/php.ini /usr/local/etc/php/conf.d/custom.ini
+COPY docker/php/zz-logging.conf /usr/local/etc/php-fpm.d/zz-logging.conf
 COPY docker/php/newrelic.ini /usr/local/etc/php/conf.d/newrelic.ini
 COPY docker/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 

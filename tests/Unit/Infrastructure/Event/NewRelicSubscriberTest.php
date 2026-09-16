@@ -69,12 +69,28 @@ class NewRelicSubscriberTest extends TestCase
 
         $this->assertSame('ServiceOrderStatusChanged', $name);
         $this->assertSame(
-            ['orderId', 'fromStatus', 'toStatus', 'durationSeconds', 'totalAmount', 'correlationId', 'env'],
+            ['orderId', 'fromStatus', 'toStatus', 'durationSeconds', 'orderAgeSeconds', 'totalAmount', 'correlationId', 'env'],
             array_keys($attributes)
         );
         $this->assertSame('RECEIVED', $attributes['fromStatus']);
         $this->assertSame('DIAGNOSIS', $attributes['toStatus']);
         $this->assertNull($attributes['durationSeconds'], 'sem transição anterior, duração é desconhecida');
+    }
+
+    public function testOrderAgeIsMeasuredFromTheFirstTransitionOfTheOrder(): void
+    {
+        $event = new ServiceOrderStatusChangedEvent('order-1', 'FINISHED', 'DELIVERED');
+
+        $this->history->method('findLastChangedAtBefore')->willReturn($event->occurredAt()->modify('-1 hour'));
+        $this->history->expects($this->once())
+            ->method('findFirstChangedAt')
+            ->with('order-1')
+            ->willReturn($event->occurredAt()->modify('-3 days'));
+
+        $this->subscriber()->onStatusChanged($event);
+
+        $this->assertSame(3600, $this->recorded[0][1]['durationSeconds']);
+        $this->assertSame(3 * 86400, $this->recorded[0][1]['orderAgeSeconds'], 'na entrega, é o lead time');
     }
 
     public function testDurationIsMeasuredFromThePreviousTransition(): void
@@ -95,6 +111,8 @@ class NewRelicSubscriberTest extends TestCase
     {
         $this->history->method('findLastChangedAtBefore')
             ->willThrowException(new \RuntimeException('banco fora'));
+        $this->history->method('findFirstChangedAt')
+            ->willThrowException(new \RuntimeException('banco fora'));
 
         $this->subscriber()->onStatusChanged(
             new ServiceOrderStatusChangedEvent('order-1', 'RECEIVED', 'DIAGNOSIS')
@@ -102,6 +120,7 @@ class NewRelicSubscriberTest extends TestCase
 
         // A failure to compute the metric must not break the business operation.
         $this->assertNull($this->recorded[0][1]['durationSeconds']);
+        $this->assertNull($this->recorded[0][1]['orderAgeSeconds']);
     }
 
     public function testDefaultRecorderIsASilentNoOpWithoutTheExtension(): void

@@ -1,14 +1,19 @@
 name: Deploy
 
 # Seção 9 dos Contratos:
-#   push em `develop` → ambiente `homologacao` (namespace oficina-hml)
-#   push em `main`    → ambiente `producao`    (namespace oficina-prod)
+#   push em `develop`             → ambiente `homologacao` (namespace oficina-hml)
+#   disparo manual com ref `main` → ambiente `producao`    (namespace oficina-prod)
 #
 # Autenticação AWS exclusivamente por OIDC (nenhuma access key estática).
 # Todo o acoplamento com os outros repositórios é lido do SSM Parameter Store.
 on:
   push:
-    branches: [develop, main]
+    branches: [develop]
+  # Produção não aplica sozinha. Um merge em `main` é uma decisão de código;
+  # aplicar em produção é uma decisão de operação, e as duas não devem acontecer
+  # no mesmo gesto. Já aconteceu neste projeto: um merge de correção em `main`
+  # provisionou um cluster de produção inteiro sem ninguém pedir. Para aplicar
+  # em `main`, dispare este workflow manualmente com a ref `main`.
   workflow_dispatch:
     inputs:
       migrations_ref:
@@ -87,12 +92,22 @@ jobs:
       # ambiente): vem do segredo de repositório e é aplicada como Secret
       # próprio, consumido com `optional: true` pelo Deployment.
       - name: Aplicar Secret da license key do New Relic
+        id: nrsecret
         env:
           NEW_RELIC_LICENSE_KEY: ${{ secrets.NEW_RELIC_LICENSE_KEY }}
         run: |
           kubectl -n "${{ steps.ssm.outputs.namespace }}" create secret generic oficina-newrelic \
             --from-literal=NEW_RELIC_LICENSE_KEY="$NEW_RELIC_LICENSE_KEY" \
             --dry-run=client -o yaml | kubectl apply -f -
+
+          # Variavel de ambiente e' fixada no start do pod. Trocar o Secret nao
+          # reinicia nada: se a imagem nao mudou, o apply nao ve diferenca no
+          # Deployment, nao ha rollout, e os pods seguem com o valor antigo — o
+          # agente continua inerte e ninguem percebe, porque nada falha.
+          #
+          # A anotacao com o hash da chave resolve sem reiniciar a toa: chave
+          # diferente muda o pod template e dispara rollout; chave igual e' no-op.
+          echo "keyhash=$(printf '%s' "$NEW_RELIC_LICENSE_KEY" | sha256sum | cut -c1-16)" >> "$GITHUB_OUTPUT"
 
       # ── Manifests ─────────────────────────────────────────────────────────
       - name: Fixar imagem e ARN do target group no overlay
@@ -154,6 +169,12 @@ jobs:
           fi
           kubectl -n "$NS" logs job/oficina-migrate --all-containers --tail=100
 
+      - name: Propagar mudanca da license key para os pods
+        run: |
+          set -euo pipefail
+          kubectl -n "${{ steps.ssm.outputs.namespace }}" patch deployment oficina-api \
+            -p '{"spec":{"template":{"metadata":{"annotations":{"oficina/newrelic-key-hash":"${{ steps.nrsecret.outputs.keyhash }}"}}}}}'
+
       - name: Aguardar rollout
         env:
           NS: ${{ steps.ssm.outputs.namespace }}
@@ -184,6 +205,24 @@ jobs:
           curl -fsS http://127.0.0.1:18080/api/health > /dev/null
 
       # ── New Relic ─────────────────────────────────────────────────────────
+      # Converte "telemetria ausente" em falha de pipeline. Sem isto, o deploy fica
+      # verde com o agente mudo, e a descoberta acontece dias depois, olhando um
+      # grafico vazio.
+      - name: Smoke de observabilidade
+        if: success()
+        env:
+          NEW_RELIC_API_KEY: ${{ secrets.NEW_RELIC_API_KEY }}
+          NEW_RELIC_ACCOUNT_ID: ${{ secrets.NEW_RELIC_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          # Gera trafego para haver o que reportar.
+          API=$(aws ssm get-parameter --name "/oficina/${ENVIRONMENT}/apigw/endpoint" \
+                  --query 'Parameter.Value' --output text 2>/dev/null || echo "")
+          if [ -n "$API" ]; then
+            for _ in 1 2 3 4 5; do curl -fsS "$API/api/health" >/dev/null || true; done
+          fi
+          python3 scripts/smoke-observabilidade.py --env "$ENVIRONMENT" --timeout 300
+
       - name: Marcar deployment no New Relic
         if: success()
         env:

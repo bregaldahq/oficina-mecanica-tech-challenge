@@ -61,6 +61,7 @@ final class NewRelicSubscriber
             'fromStatus'      => $event->previousStatus,
             'toStatus'        => $event->newStatus,
             'durationSeconds' => $this->durationSeconds($event),
+            'orderAgeSeconds' => $this->orderAgeSeconds($event),
             'totalAmount'     => $event->totalAmount,
             'correlationId'   => $this->context->getCorrelationId(),
             'env'             => $this->env,
@@ -81,5 +82,27 @@ final class NewRelicSubscriber
         }
 
         return max(0, $event->occurredAt()->getTimestamp() - $previous->getTimestamp());
+    }
+
+    /**
+     * Seconds since the order was opened; null when unknown.
+     *
+     * On the transition into DELIVERED this is the order's lead time. Summing the durations of
+     * the individual transitions would not be: an order whose early history fell outside the
+     * query window would be counted with only part of its life.
+     */
+    private function orderAgeSeconds(ServiceOrderStatusChangedEvent $event): ?int
+    {
+        try {
+            $openedAt = $this->history->findFirstChangedAt($event->orderId);
+        } catch (\Throwable) {
+            return null;
+        }
+
+        if ($openedAt === null) {
+            return null;
+        }
+
+        return max(0, $event->occurredAt()->getTimestamp() - $openedAt->getTimestamp());
     }
 }

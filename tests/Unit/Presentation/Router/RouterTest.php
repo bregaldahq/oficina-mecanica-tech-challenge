@@ -152,4 +152,49 @@ class RouterTest extends TestCase
 
         $this->assertSame('ready', $this->dispatch($router, 'GET', '/api/ready/'));
     }
+
+
+    /** @return array{0: Router, 1: \ArrayObject<int, string>} */
+    private function routerRecordingNames(): array
+    {
+        /** @var \ArrayObject<int, string> $names */
+        $names  = new \ArrayObject();
+        $router = $this->router();
+        $router->setTransactionNamer(static function (string $name) use ($names): void {
+            $names[] = $name;
+        });
+
+        return [$router, $names];
+    }
+
+    public function testTransactionIsNamedAfterTheRoutePatternNotTheConcreteUri(): void
+    {
+        [$router, $names] = $this->routerRecordingNames();
+        $router->patch('/api/service-orders/{id}/status', fn () => print('ok'), requireAuth: false);
+
+        $this->dispatch($router, 'PATCH', '/api/service-orders/0b6f1c1e-1111-4111-8111-111111111111/status');
+
+        $this->assertSame(['PATCH /api/service-orders/{id}/status'], $names->getArrayCopy());
+    }
+
+    public function testRejectedRequestIsStillAttributedToItsRoute(): void
+    {
+        [$router, $names] = $this->routerRecordingNames();
+        $router->get('/api/customers', fn () => print('[]'))->requireRole('admin');
+        $this->authenticateAs(['sub' => 'cust-1', 'role' => 'customer']);
+
+        $this->dispatch($router, 'GET', '/api/customers');
+
+        $this->assertSame(403, http_response_code());
+        $this->assertSame(['GET /api/customers'], $names->getArrayCopy());
+    }
+
+    public function testUnknownRouteIsNamed404InsteadOfItsUri(): void
+    {
+        [$router, $names] = $this->routerRecordingNames();
+
+        $this->dispatch($router, 'GET', '/wp-admin/setup.php');
+
+        $this->assertSame(['404'], $names->getArrayCopy());
+    }
 }

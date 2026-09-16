@@ -8,6 +8,8 @@ use App\Application\DTO\ServiceOrder\CreateServiceOrderInputDTO;
 use App\Application\UseCase\ServiceOrder\CreateServiceOrderUseCase;
 use App\Domain\Entity\Customer;
 use App\Domain\Entity\Vehicle;
+use App\Domain\Event\EventDispatcherInterface;
+use App\Domain\Event\ServiceOrderCreatedEvent;
 use App\Domain\Exception\DomainException;
 use App\Domain\Exception\NotFoundException;
 use App\Domain\Repository\CustomerRepositoryInterface;
@@ -25,6 +27,7 @@ class CreateServiceOrderUseCaseTest extends TestCase
     private MockObject&VehicleRepositoryInterface $vehicleRepo;
     private MockObject&ServiceOrderRepositoryInterface $orderRepo;
     private MockObject&UuidGeneratorInterface $uuid;
+    private MockObject&EventDispatcherInterface $dispatcher;
 
     private CreateServiceOrderUseCase $useCase;
 
@@ -34,6 +37,7 @@ class CreateServiceOrderUseCaseTest extends TestCase
         $this->vehicleRepo  = $this->createMock(VehicleRepositoryInterface::class);
         $this->orderRepo    = $this->createMock(ServiceOrderRepositoryInterface::class);
         $this->uuid         = $this->createMock(UuidGeneratorInterface::class);
+        $this->dispatcher   = $this->createMock(EventDispatcherInterface::class);
 
         $this->uuid->method('generate')->willReturn('test-uuid-1234');
 
@@ -42,6 +46,7 @@ class CreateServiceOrderUseCaseTest extends TestCase
             $this->vehicleRepo,
             $this->orderRepo,
             $this->uuid,
+            $this->dispatcher,
         );
     }
 
@@ -92,5 +97,36 @@ class CreateServiceOrderUseCaseTest extends TestCase
         $this->vehicleRepo->method('findById')->willReturn($this->makeVehicle(customerId: 'other-customer'));
 
         $this->useCase->execute(new CreateServiceOrderInputDTO('cust-001', 'veh-001'));
+    }
+
+    /**
+     * O evento de criacao precisa ser PUBLICADO, nao apenas registrado no agregado.
+     *
+     * Sem o dispatch ele fica preso ali: nao vira custom event no New Relic e o
+     * StatusHistorySubscriber nao grava a linha inicial do historico. Os paineis de
+     * volume diario, OS abertas e clientes atendidos ficam zerados — e nada falha,
+     * porque a OS e' criada normalmente. Foi assim que passou despercebido.
+     */
+    public function testPublicaOEventoDeCriacao(): void
+    {
+        $this->customerRepo->method('findById')->willReturn($this->makeCustomer());
+        $this->vehicleRepo->method('findById')->willReturn($this->makeVehicle());
+
+        $publicados = [];
+        $this->dispatcher->expects(self::once())
+            ->method('dispatchAll')
+            ->willReturnCallback(function (array $eventos) use (&$publicados): void {
+                $publicados = $eventos;
+            });
+
+        $this->useCase->execute(new CreateServiceOrderInputDTO(
+            customerId: 'cust-001',
+            vehicleId: 'veh-001',
+        ));
+
+        self::assertCount(1, $publicados);
+        self::assertInstanceOf(ServiceOrderCreatedEvent::class, $publicados[0]);
+        self::assertSame('test-uuid-1234', $publicados[0]->orderId);
+        self::assertSame('cust-001', $publicados[0]->customerId);
     }
 }
